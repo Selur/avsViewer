@@ -29,7 +29,8 @@ HEADERS += LocalSocketIpcServer.h \
     MarkSlider.h \
     ImageLabel.h \
     stdafx.h \
-    avisynth.h
+    avisynth.h \
+    MoveScrollArea.h
 SOURCES += LocalSocketIpcServer.cpp \
     LocalSocketIpcClient.cpp \
     avsViewer.cpp \
@@ -37,6 +38,7 @@ SOURCES += LocalSocketIpcServer.cpp \
     MarkSlider.cpp \
     ImageLabel.cpp \
     interface.cpp \
-    main.cpp
+    main.cpp \
+    MoveScrollArea.cpp
 FORMS += viewer.ui
 RESOURCES += 

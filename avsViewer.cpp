@@ -20,18 +20,18 @@
 #include "LocalSocketIpcClient.h"
 #include <QWheelEvent>
 #include <QFile>
+#include <QScrollbar>
 using namespace std;
 
 const QString SEP1 = " ### ";
 
-avsViewer::avsViewer(QWidget *parent, QString path, double mult, bool cutSupport, QString cuts,
-    QString ipcID, QString matrix)
+avsViewer::avsViewer(QWidget *parent, QString path, double mult, QString ipcID, QString matrix)
     : QWidget(parent), ui(), m_env(NULL), m_inf(), m_clip(), m_frameCount(100), m_current(-1),
         m_currentInput(path), m_version(QString()), m_avsModified(QString()),
         m_inputPath(QString()), m_res(NULL), m_mult(mult), m_currentImage(),
-        m_cutSupport(cutSupport), m_dualView(false),
-        m_desktopWidth(1920), m_desktopHeight(1080),
-        m_ipcID(ipcID), m_currentContent(QString()), m_ipcServer(NULL), m_ipcClient(NULL), m_matrix(matrix)
+        m_dualView(false), m_desktopWidth(1920), m_desktopHeight(1080),
+        m_ipcID(ipcID), m_currentContent(QString()), m_ipcServer(NULL), m_ipcClient(NULL),
+        m_matrix(matrix), m_showLabel(new QLabel()), m_par(1), m_zoom(1)
 {
   ui.setupUi(this);
   QString stylepath = QApplication::applicationDirPath()+"/avsViewer.style";
@@ -43,24 +43,20 @@ avsViewer::avsViewer(QWidget *parent, QString path, double mult, bool cutSupport
      this->setStyleSheet(style);
    }
   }
-
-  if (!m_cutSupport) {
-    delete ui.cutStackedWidget;
-    cuts = QString();
-  }
   if (m_currentInput.isEmpty()) {
     return;
   }
-  ui.showLabel->setText(tr("Preparing environment for %1").arg(m_currentInput));
+  m_showLabel->setText(tr("Preparing environment for %1").arg(m_currentInput));
+  ui.scrollArea->setWidget(m_showLabel);
   delete ui.openAvsPushButton;
 
   QDesktopWidget *mydesk = QApplication::desktop();
-  cout << "Detected desktop resolution: " << mydesk->width() << "x" << mydesk->height() << endl;
-  cout << "Detected screen count: " << mydesk->screenCount();
+  cout << "Detected desktop resolution: " << mydesk->width() << "x" << mydesk->height() << ", pixel aspect ratio: "  << mydesk->devicePixelRatioF() << ", screen count: " << mydesk->screenCount() << endl;
+  m_par = mydesk->devicePixelRatioF();
   m_desktopWidth = mydesk->width() / mydesk->screenCount();
   m_desktopHeight = mydesk->height();
-  cout << ", using desktop resolution: " << m_desktopWidth << "x" << m_desktopHeight << endl;
-  this->init(0, cuts);
+  cout << "-> using desktop resolution: " << m_desktopWidth << "x" << m_desktopHeight << endl;
+  this->init(0);
 }
 
 void avsViewer::wheelEvent(QWheelEvent *event)
@@ -82,39 +78,11 @@ void avsViewer::wheelEvent(QWheelEvent *event)
 avsViewer::~avsViewer()
 {
   cout << qPrintable(tr("Closing,...")) << endl;
-  if (m_cutSupport) {
-    cout << qPrintable(tr("Collecting cuts,..")) << endl;
-    QString elem;
-    for (int i = 0, c = ui.cutListWidget->count(); i < c; ++i) {
-      elem = ui.cutListWidget->item(i)->text();
-      if (elem.isEmpty()) {
-        continue;
-      }
-      cout << "Cut: " << qPrintable(elem) << endl;
-    }
-  }
   if (!m_avsModified.isEmpty()) {
     QFile::remove(m_avsModified);
     cout << qPrintable(tr("deleting: %1").arg(m_avsModified)) << endl;
   }
   cout << qPrintable(tr("finished,...")) << endl;
-}
-
-void avsViewer::updateExistingMarks()
-{
-  if (!m_cutSupport) {
-    return;
-  }
-  QStringList cuts;
-  QString elem;
-  for (int i = 0, c = ui.cutListWidget->count(); i < c; ++i) {
-    elem = ui.cutListWidget->item(i)->text();
-    if (elem.isEmpty()) {
-      continue;
-    }
-    cuts << elem;
-  }
-  ui.frameHorizontalSlider->multiMark(cuts);
 }
 
 int avsViewer::invokeImportInternal(const char *inputFile)
@@ -181,26 +149,6 @@ int avsViewer::invoke(const char *function)
   return 0;
 }
 
-//TODO: add cut-edit option
-//TODO: add preview-trimms, add reset view
-
-void avsViewer::on_setCutStartPushButton_clicked()
-{
-  if (!m_cutSupport) {
-    return;
-  }
-  cout << "set cut-start to: " << m_current << endl;
-  ui.frameHorizontalSlider->setStart(m_current);
-}
-void avsViewer::on_setCutEndPushButton_clicked()
-{
-  if (!m_cutSupport) {
-    return;
-  }
-  cout << "set cut-end to: " << m_current << endl;
-  ui.frameHorizontalSlider->setEnd(m_current);
-}
-
 void avsViewer::on_jumpBackwardPushButton_clicked()
 {
   int frame = m_current;
@@ -236,121 +184,6 @@ QString avsViewer::fillUp(int number)
     ret = "0" + ret;
   }
   return ret;
-}
-
-void avsViewer::on_addCutPushButton_clicked()
-{
-  if (!m_cutSupport) {
-    return;
-  }
-  int start = ui.frameHorizontalSlider->getStart();
-  int end = ui.frameHorizontalSlider->getEnd();
-  if ((start == 0 && end == 0) || start == end) {
-    return;
-  }
-  if (start != ui.frameHorizontalSlider->minimum() || end != ui.frameHorizontalSlider->maximum()) {
-    if (!this->isValidCut(start, end)) {
-      return;
-    }
-    QString cut = this->fillUp(start) + "-" + this->fillUp(end);
-    cout << "add cut item: " << qPrintable(cut) << endl;
-    ui.cutListWidget->addItem(cut);
-    ui.cutListWidget->sortItems();
-    ui.frameHorizontalSlider->resetMarks();
-  }
-  this->updateExistingMarks();
-}
-
-void avsViewer::addCutList(QString list)
-{
-  if (list.isEmpty()) {
-    return;
-  }
-  QStringList cuts = list.split("#"), elems;
-  QString from, to;
-  foreach (QString cut, cuts)
-  {
-    elems = cut.split("-");
-    if (elems.count() != 2) {
-      continue;
-    }
-    from = elems.at(0);
-    to = elems.at(1);
-    if (!this->isValidCut(from.toInt(), to.toInt())) {
-      continue;
-    }
-    ui.cutListWidget->addItem(cut);
-    ui.cutListWidget->sortItems();
-    ui.frameHorizontalSlider->resetMarks();
-  }
-  this->updateExistingMarks();
-}
-
-bool avsViewer::isValidCut(int start, int end)
-{
-  cout << qPrintable(" " + tr("checking is valid for: %1-%2").arg(start).arg(end)) << endl;
-  if (ui.cutStackedWidget == NULL) {
-    cerr << qPrintable(tr("isValidCut called while cutStackedWidget is NULL!")) << endl;
-    return false;
-  }
-  if (ui.cutListWidget == NULL) {
-    cerr << qPrintable(tr("isValidCut called while cutListWidget is NULL!")) << endl;
-    return false;
-  }
-  int pos, count;
-  QString elem;
-  QStringList cutElems;
-
-  if (ui.cutListWidget == NULL) {
-    cerr << qPrintable(tr("isValidCut called while cutListWidget is NULL, but was not before!"))
-        << endl;
-    return false;
-  }
-  int existingCutCount = ui.cutListWidget->count();
-
-  for (int i = 0; i < existingCutCount; ++i) {
-    elem = ui.cutListWidget->item(i)->text();
-    if (elem.isEmpty()) {
-      continue;
-    }
-    cutElems = elem.split("-");
-    count = cutElems.count();
-    if (count != 2) {
-      cerr << qPrintable(tr("Wrong formated cut-pair: %1").arg(elem)) << endl;
-      return false;
-    }
-    pos = cutElems.at(0).toInt(); //start
-    if ((pos > start) && (pos < end)) {
-      cerr
-          << qPrintable(
-              tr("Ignored %1-%2 since it overlaps with %3(%4).").arg(start).arg(end).arg(elem).arg(
-                  pos)) << endl;
-      return false;
-    }
-    pos = cutElems.at(1).toInt(); //end
-    if ((pos > start) && (pos < end)) {
-      cerr
-          << qPrintable(
-              tr("Ignored %1-%2 since it overlaps with %3 (%4).").arg(start).arg(end).arg(elem).arg(
-                  pos)) << endl;
-      return false;
-    }
-  }
-  return true;
-}
-
-void avsViewer::on_removeCutPushButton_clicked()
-{
-  if (!m_cutSupport) {
-    return;
-  }
-  int row = ui.cutListWidget->currentRow();
-  if (row == -1) {
-    return;
-  }
-  QListWidgetItem *item = ui.cutListWidget->takeItem(row);
-  cout << "removing " << qPrintable(item->text()) << " from cut-list" << endl;
-  this->updateExistingMarks();
 }
 
 QString removeLastSeparatorFromPath(QString input)
@@ -391,7 +224,7 @@ QString getDirectory(const QString input)
 
 void avsViewer::on_saveImagePushButton_clicked()
 {
-  ui.showLabel->setText(tr("Set output png file,.."));
+  m_showLabel->setText(tr("Set output png file,.."));
   QString name = tr("Select input file");
   QString select = tr("Output (*.png)");
   QString inputPath = QApplication::applicationDirPath();
@@ -417,7 +250,6 @@ void avsViewer::cleanUp()
     m_env->DeleteScriptEnvironment(); //delete the old script environment
     m_env = NULL; // ensure new environment created next time
     m_current = 0;
-    m_cuts = QString();
   }
 }
 
@@ -430,6 +262,15 @@ void avsViewer::on_infoCheckBox_toggled()
 void avsViewer::on_histogramCheckBox_toggled()
 {
   this->cleanUp();
+  this->init(m_current);
+}
+
+
+void avsViewer::on_scrollingCheckBox_toggled()
+{
+  int curr = m_current;
+  this->cleanUp();
+  m_current = curr;
   this->init(m_current);
 }
 
@@ -655,9 +496,9 @@ void addHistrogramToContent(const QString content, QString &newContent, const QS
   }
 }
 
-void applyResolution(const QString content, QString &newContent, double mult, QString resize)
+void applyResolution(const QString& content, QString &newContent, double mult, const QString& resize)
 {
-  cout << "applyResolution: " << qPrintable(resize) << ", mult: " << mult << endl;
+  cout << "applyResolution: " << qPrintable(resize) << ", mult: " << mult << ", resize: " << qPrintable(resize) << endl;
   if (resize == "None") {
     return;
   }
@@ -728,17 +569,15 @@ void avsViewer::callMethod(const QString& typ, const QString& value, const QStri
   this->setWindowTitle(QString("%1, %2:\n%3").arg(typ).arg(value).arg(input));
   if (typ == "changeTo" && QFile::exists(value)) {
     int currentPosition = 0;
-    QString cuts;
     QString currentInput = getCurrentInput(m_currentContent); // the input of the avisynth script
     if (currentInput == input) {
       currentPosition = m_current;
-      cuts = m_cuts;
     }
     this->killEnv();
     m_currentInput = value; //set current input
     cout << "Change current input to: " << qPrintable(m_currentInput) << endl;
-    ui.showLabel->setText(tr("Preparing environment for %1").arg(m_currentInput));
-    this->init(currentPosition, cuts);
+    m_showLabel->setText(tr("Preparing environment for %1").arg(m_currentInput));
+    this->init(currentPosition);
     qApp->processEvents();
     return;
   }
@@ -749,7 +588,7 @@ void avsViewer::callMethod(const QString& typ, const QString& value, const QStri
 /**
  * initilazing an avisynth environment for the current input file
  **/
-int avsViewer::init(int start, const QString cuts)
+int avsViewer::init(int start)
 {
   if (start < 0) {
     start = 0;
@@ -777,6 +616,7 @@ int avsViewer::init(int start, const QString cuts)
     return -2;
   }
   bool firstTime = this->minimumSize().width() == 0;
+  bool scrolling = ui.scrollingCheckBox->isChecked();
   try { // load script
     QLibrary avsDLL("avisynth.dll");
     if (!avsDLL.isLoaded() && !avsDLL.load()) { //load avisynth.dll if it's not already loaded and abort if it couldn't be loaded
@@ -808,6 +648,23 @@ int avsViewer::init(int start, const QString cuts)
       cerr << qPrintable(tr("Could not get the current avisynth version,..")) << endl;
       return -5;
     }
+
+    if (scrolling) {
+      ui.scrollArea->setHorizontalScrollBarPolicy( Qt::ScrollBarAsNeeded );
+      ui.scrollArea->setVerticalScrollBarPolicy( Qt::ScrollBarAsNeeded );
+      ui.scrollArea->verticalScrollBar()->adjustSize();
+      ui.scrollArea->verticalScrollBar()->show();
+      ui.scrollArea->horizontalScrollBar()->adjustSize();
+      ui.scrollArea->horizontalScrollBar()->show();
+    } else {
+      ui.scrollArea->setHorizontalScrollBarPolicy( Qt::ScrollBarAlwaysOff );
+      ui.scrollArea->setVerticalScrollBarPolicy( Qt::ScrollBarAlwaysOff );
+      ui.scrollArea->verticalScrollBar()->resize(0, 0);
+      ui.scrollArea->verticalScrollBar()->hide();
+      ui.scrollArea->horizontalScrollBar()->resize(0, 0);
+      ui.scrollArea->horizontalScrollBar()->hide();
+    }
+
     QString newContent, input = m_currentInput;
     bool invokeFFInfo = false;
     QFile file(input);
@@ -933,17 +790,31 @@ int avsViewer::init(int start, const QString cuts)
     ui.frameHorizontalSlider->resetMarks();
     int width = m_inf.width;
     int height = m_inf.height;
-    while (width > (m_desktopWidth - 10) || height > (m_desktopHeight - 10)) {
-      width *= 0.9;
-      height *= 0.9;
+    if (!scrolling) {
+      if (firstTime) {
+        while (width > (m_desktopWidth - 50) || height > (m_desktopHeight - 50)) {
+          width *= 0.9;
+          height *= 0.9;
+        }
+      } else {
+        width = ui.scrollArea->width();
+        height = ui.scrollArea->height();
+      }
     }
-    cout << qPrintable(" " + tr("label resolution %1x%2").arg(width).arg(height)) << endl;
-    ui.showLabel->setMaximumSize(32767, 32767);
-    if (firstTime || ui.histogramCheckBox->isChecked()) {
-      ui.showLabel->resize(width, height);
+    if (firstTime || ui.histogramCheckBox->isChecked() || !scrolling) {
+      cout << qPrintable(" " + tr("resized label resolution %1x%2").arg(width).arg(height)) << endl;
+      m_showLabel->resize(width, height);
+      m_showLabel->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
     }
     cout << qPrintable(" " + tr("showing first frame,..")) << endl;
     this->showFrame(start); //show first frame
+    if (width > height) {
+      this->resize(this->width(), this->sizeHint().height());
+    } else if (width < height){
+      this->resize(this->sizeHint().width(), this->height());
+    } else {
+      this->adjustSize();
+    }
   } catch (AvisynthError &err) { //catch AvisynthErrors
     cerr << qPrintable(tr("-> Avisynth error: %1").arg(err.msg)) << endl;
     return -11;
@@ -955,19 +826,14 @@ int avsViewer::init(int start, const QString cuts)
   if (m_ipcClient != NULL) {
     m_ipcClient->send_MessageToServer("AvsViewer started ipcClient&Server with id " + m_ipcID);
   }
-  if (!cuts.isEmpty()) {
-    this->addCutList(cuts);
-  }
-  m_cuts = cuts;
   if ((!firstTime && !ui.histogramCheckBox->isChecked()) || this->isFullScreen()) {
     return 0;
   }
-  QSize size = ui.showLabel->size();
-  int width = size.width() + 8;
-  int height = size.height() + 48;
-  cout << qPrintable(" " + tr("window resolution %1x%2").arg(width).arg(height)) << endl;
-  this->resize(width, height);
 
+  if (!scrolling) {
+    cout << "scrollArea size(3), width: " << ui.scrollArea->width() << ", height: " << ui.scrollArea->height() << std::endl;
+    m_showLabel->resize(ui.scrollArea->size());
+  }
   return 0;
 }
 /**
@@ -1003,10 +869,15 @@ void avsViewer::showFrame(int i)
     int height = m_inf.height;
     cout << "frame resolution: " << width << "x" << height << endl;
     QImage image(f->GetReadPtr(), width, height, QImage::Format_RGB32); //create a QImage
-    ui.showLabel->setText(QString());
+    m_showLabel->setText(QString());
     m_currentImage = image.mirrored(); // flip image otherwise it's upside down
-
-    ui.showLabel->setPixmap(QPixmap::fromImage(m_currentImage)); // addResolution does the resizing
+    if (!ui.scrollingCheckBox->isChecked()) {
+      m_showLabel->setPixmap(QPixmap::fromImage(m_currentImage).scaled(this->width()-8, this->height()-40, Qt::KeepAspectRatio, Qt::SmoothTransformation));
+    } else if (m_zoom != 1) {
+      m_showLabel->setPixmap(QPixmap::fromImage(m_currentImage).scaled(width*m_zoom, height*m_zoom, Qt::KeepAspectRatio, Qt::SmoothTransformation));
+    } else {
+      m_showLabel->setPixmap(QPixmap::fromImage(m_currentImage)); // addResolution does the resizing
+    }
     //cout << "show frame: " << i << endl;
     m_current = i; //set m_current to i
     ui.frameHorizontalSlider->setSliderPosition(m_current); // adjust the slider position
@@ -1014,7 +885,7 @@ void avsViewer::showFrame(int i)
     if (m_dualView) {
       title += " " + tr("(left side = original, right side = filtered)");
     }
-    //this->setWindowTitle(title);
+    this->setWindowTitle(title);
   } catch (...) {
     cerr << " couldn't show frame,..." << endl;
   }
@@ -1028,9 +899,6 @@ void avsViewer::killEnv()
     m_avsModified = QString();
   }
   ui.frameHorizontalSlider->resetMarks();
-  if (m_cutSupport) {
-    ui.cutListWidget->clear();
-  }
 }
 
 /**
@@ -1038,7 +906,7 @@ void avsViewer::killEnv()
  **/
 void avsViewer::on_openAvsPushButton_clicked()
 {
-  ui.showLabel->setText(tr("Opening new file,.."));
+  m_showLabel->setText(tr("Opening new file,.."));
   QString name = tr("Select input file");
   QString select = tr("Input (*.avs)");
   QString inputPath = QApplication::applicationDirPath();
@@ -1050,9 +918,18 @@ void avsViewer::on_openAvsPushButton_clicked()
   this->killEnv();
 
   m_currentInput = input; //set current input
-  ui.showLabel->setText(tr("Preparing environment for %1").arg(m_currentInput));
+  m_showLabel->setText(tr("Preparing environment for %1").arg(m_currentInput));
   cout << "Current input: " << qPrintable(m_currentInput) << endl;
   this->init();
+}
+
+void avsViewer::resizeEvent(QResizeEvent* event)
+{
+   QWidget::resizeEvent(event);
+   if (m_current < 0) {
+     m_current = 0;
+   }
+   this->showFrame(m_current);
 }
 
 /**

@@ -9,17 +9,18 @@
 #include <QWidget>
 #include <QString>
 #include <QPixmap>
+#include <QLabel>
 
 class IScriptEnvironment;
 class LocalSocketIpcServer;
 class LocalSocketIpcClient;
+class QResizeEvent;
 
 class avsViewer : public QWidget
 {
   Q_OBJECT
   public:
-    avsViewer(QWidget *parent, QString path, double mult, bool cutSupport, QString cuts,
-        QString ipcID, QString matrix);
+    avsViewer(QWidget *parent, QString path, double mult, QString ipcID, QString matrix);
     ~avsViewer();
 
   private:
@@ -32,23 +33,22 @@ class avsViewer : public QWidget
     AVSValue m_res;
     double m_mult;
     QImage m_currentImage;
-    bool m_cutSupport, m_dualView;
+    bool m_dualView;
     int m_desktopWidth, m_desktopHeight;
-    QString m_ipcID, m_currentContent, m_cuts;
+    QString m_ipcID, m_currentContent;
     LocalSocketIpcServer* m_ipcServer;
     LocalSocketIpcClient* m_ipcClient;
     QString m_matrix;
+    QLabel* m_showLabel;
+    double m_par, m_zoom;
     void showFrame(int frame);
-    int init(int start = 0, const QString cuts = QString());
+    int init(int start = 0);
     int import(const char *inputFile);
     int invoke(const char *function);
     int invokeInternal(const char *function);
     int invokeImportInternal(const char *inputFile);
     void killEnv();
-    bool isValidCut(int start, int end);
-    void addCutList(QString list);
     QString fillUp(int number);
-    void updateExistingMarks();
     void callMethod(const QString& typ, const QString& value, const QString &input);
     void cleanUp();
 
@@ -61,16 +61,14 @@ class avsViewer : public QWidget
     void on_infoCheckBox_toggled();
     void on_histogramCheckBox_toggled();
     void on_saveImagePushButton_clicked();
-    void on_setCutStartPushButton_clicked();
-    void on_setCutEndPushButton_clicked();
-    void on_addCutPushButton_clicked();
-    void on_removeCutPushButton_clicked();
     void on_aspectRatioAdjustmentComboBox_currentIndexChanged(QString value);
     void fromConsoleReader(QString text);
     void receivedMessage(const QString& message);
     void on_jumpBackwardPushButton_clicked();
     void on_jumpForwardPushButton_clicked();
     void wheelEvent(QWheelEvent *event);
+    void on_scrollingCheckBox_toggled();
+    void resizeEvent(QResizeEvent* event);
 };
 
 #endif // AVSVIEWER_H
