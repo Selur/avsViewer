@@ -41,6 +41,8 @@ class avsViewer : public QWidget
     QString m_matrix;
     QLabel* m_showLabel;
     double m_par, m_zoom;
+    int m_currentFrameWidth;
+    int m_currentFrameHeight;
     void showFrame(int frame);
     int init(int start = 0);
     int import(const char *inputFile);

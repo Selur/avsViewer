@@ -31,7 +31,8 @@ avsViewer::avsViewer(QWidget *parent, QString path, double mult, QString ipcID, 
         m_inputPath(QString()), m_res(NULL), m_mult(mult), m_currentImage(),
         m_dualView(false), m_desktopWidth(1920), m_desktopHeight(1080),
         m_ipcID(ipcID), m_currentContent(QString()), m_ipcServer(NULL), m_ipcClient(NULL),
-        m_matrix(matrix), m_showLabel(new QLabel()), m_par(1), m_zoom(1)
+        m_matrix(matrix), m_showLabel(new QLabel()), m_par(1), m_zoom(1),
+        m_currentFrameWidth(0), m_currentFrameHeight(0)
 {
   ui.setupUi(this);
   QString stylepath = QApplication::applicationDirPath()+"/avsViewer.style";
@@ -573,11 +574,15 @@ void avsViewer::callMethod(const QString& typ, const QString& value, const QStri
     if (currentInput == input) {
       currentPosition = m_current;
     }
+    m_currentFrameWidth = m_inf.width;
+    m_currentFrameHeight = m_inf.height;
     this->killEnv();
     m_currentInput = value; //set current input
     cout << "Change current input to: " << qPrintable(m_currentInput) << endl;
     m_showLabel->setText(tr("Preparing environment for %1").arg(m_currentInput));
     this->init(currentPosition);
+    m_currentFrameWidth = 0;
+    m_currentFrameHeight = 0;
     qApp->processEvents();
     return;
   }
@@ -616,7 +621,9 @@ int avsViewer::init(int start)
     return -2;
   }
   bool firstTime = this->minimumSize().width() == 0;
+  cout << " first time: " << (firstTime ? "true" : "false") << std::endl;
   bool scrolling = ui.scrollingCheckBox->isChecked();
+  cout << " scrolling: " << (scrolling ? "true" : "false") << std::endl;
   try { // load script
     QLibrary avsDLL("avisynth.dll");
     if (!avsDLL.isLoaded() && !avsDLL.load()) { //load avisynth.dll if it's not already loaded and abort if it couldn't be loaded
@@ -790,6 +797,10 @@ int avsViewer::init(int start)
     ui.frameHorizontalSlider->resetMarks();
     int width = m_inf.width;
     int height = m_inf.height;
+    if (m_currentFrameWidth != 0) {
+      width = m_currentFrameWidth;
+      height = m_currentFrameHeight;
+    }
     if (!scrolling) {
       if (firstTime) {
         while (width > (m_desktopWidth - 50) || height > (m_desktopHeight - 50)) {
