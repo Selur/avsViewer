@@ -793,7 +793,8 @@ int avsViewer::init(int start)
     m_frameCount = m_inf.num_frames; //get frame count
     cout << qPrintable(" -> " + tr("Clip contains: %1 frames").arg(m_frameCount)) << endl;
     cout << qPrintable(" " + tr("Adjusting slider to frame count,..")) << endl;
-    ui.frameHorizontalSlider->setMaximum(m_frameCount);
+    ui.frameHorizontalSlider->setMaximum(m_frameCount -1);
+    ui.jumpToSpinBox->setMaximum(m_frameCount -1);
     ui.frameHorizontalSlider->resetMarks();
     int width = m_inf.width;
     int height = m_inf.height;
@@ -910,6 +911,30 @@ void avsViewer::killEnv()
     m_avsModified = QString();
   }
   ui.frameHorizontalSlider->resetMarks();
+}
+
+void avsViewer::on_jumpToStartPushButton_clicked()
+{
+  if (m_frameCount == 0) {
+    return;
+  }
+  this->showFrame(0);
+}
+void avsViewer::on_jumpToEndPushButton_clicked()
+{
+  if (m_frameCount == 0) {
+    return;
+  }
+  this->showFrame(m_frameCount -1);
+}
+
+void avsViewer::on_jumpToPushButton_clicked()
+{
+          if (m_frameCount == 0) {
+            return;
+          }
+  int to = ui.jumpToSpinBox->value();
+  this->showFrame(to);
 }
 
 /**

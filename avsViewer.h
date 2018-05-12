@@ -71,6 +71,9 @@ class avsViewer : public QWidget
     void wheelEvent(QWheelEvent *event);
     void on_scrollingCheckBox_toggled();
     void resizeEvent(QResizeEvent* event);
+    void on_jumpToPushButton_clicked();
+    void on_jumpToStartPushButton_clicked();
+    void on_jumpToEndPushButton_clicked();
 };
 
 #endif // AVSVIEWER_H
