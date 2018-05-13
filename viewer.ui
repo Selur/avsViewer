@@ -247,7 +247,7 @@
       </spacer>
      </item>
      <item>
-      <widget class="QPushButton" name="jumpToStartpushButton">
+      <widget class="QPushButton" name="jumpToStartPushButton">
        <property name="toolTip">
         <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;Jump to first frame.&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
        </property>
