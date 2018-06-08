@@ -437,6 +437,7 @@ void addShowInfoToContent(const int distributorIndex, const bool ffmpegSource,
       newContent += "\n";
       newContent += "return last";
   } else {
+      newContent = content;
       int index = newContent.lastIndexOf("return");
       if (index != -1) {
         newContent = newContent.remove(index, newContent.size()).trimmed();
@@ -567,8 +568,12 @@ QString getCurrentInput(const QString& script)
 void avsViewer::callMethod(const QString& typ, const QString& value, const QString &input)
 {
   cout << "callmethod: " << qPrintable(typ) << ", value "<< qPrintable(value) << ", input " << qPrintable(input) << std::endl;
+  if (!QFile::exists(value)){
+    cout << qPrintable(QString("Change ignored since '%1' doesn't exist.").arg(value)) << std::endl;
+    return;
+  }
   this->setWindowTitle(QString("%1, %2:\n%3").arg(typ).arg(value).arg(input));
-  if (typ == "changeTo" && QFile::exists(value)) {
+  if (typ == "changeTo") {
     int currentPosition = 0;
     QString currentInput = getCurrentInput(m_currentContent); // the input of the avisynth script
     if (currentInput == input) {
@@ -704,8 +709,7 @@ int avsViewer::init(int start)
       showInfo = ui.infoCheckBox->isChecked();
       if (showInfo) {
         int index = content.indexOf("distributor()", Qt::CaseInsensitive);
-        addShowInfoToContent(index, ffmpegSource, content, newContent, ffms2Avs, ffms2Line,
-            invokeFFInfo, mpeg2source, dgnvsource);
+        addShowInfoToContent(index, ffmpegSource, content, newContent, ffms2Avs, ffms2Line, invokeFFInfo, mpeg2source, dgnvsource);
       }
       if (ui.histogramCheckBox->isChecked()) {
         addHistrogramToContent(content, newContent, m_matrix);
@@ -895,7 +899,7 @@ void avsViewer::showFrame(int i)
     ui.frameHorizontalSlider->setSliderPosition(m_current); // adjust the slider position
     QString title = tr("showing frame number: %1 of %2").arg(m_current).arg(m_frameCount); //adjust title bar;
     if (m_dualView) {
-      title += " " + tr("(left side = original, right side = filtered)");
+      title += " " + tr("(left side = original, right side = filtered; input: %1)").arg(m_currentInput);
     }
     this->setWindowTitle(title);
   } catch (...) {
