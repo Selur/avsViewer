@@ -501,7 +501,6 @@ void applyResolution(const QString& content, QString &newContent, double mult, c
   if (resize == QString("None")) {
     return;
   }
-  cout << "applyResolution: " << qPrintable(resize) << ", mult: " << mult << ", resize: " << qPrintable(resize) << endl;
   if (newContent.isEmpty()) {
     newContent = content;
   }
@@ -510,7 +509,7 @@ void applyResolution(const QString& content, QString &newContent, double mult, c
   if (mult == 0.0) {
      mult = 1.0;
   }
-  resizer = resize + "Resize(Ceil(last.Width*" + QString::number(mult) + " -(Ceil(last.Width*" + QString::number(mult) + ") % 4)), last.Height)\n";
+  resizer = resize + "Resize(Ceil(last.Width*" + QString::number(mult) + " -(Ceil(last.Width*" + QString::number(mult) + ") % 2)), last.Height)\n";
   int index = newContent.indexOf("distributor()", Qt::CaseInsensitive);
   if (index != -1) { // add before distributor
     newContent.insert(index, resizer);
@@ -881,9 +880,7 @@ void avsViewer::showFrame(const int& i)
       return;
     }
     int width = m_inf.width;
-    width += width%8;
     int height = m_inf.height;
-    height += height%8;
     cout << "avisynth frame resolution: " << width << "x" << height << endl;
     if (m_mult == 0.0) {
       m_mult = 1;
