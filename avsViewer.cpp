@@ -14,24 +14,24 @@
 #include <QStringList>
 #include <QTextStream>
 #include <QApplication>
-#include <QDesktopWidget>
 #include <QListWidgetItem>
 #include "LocalSocketIpcServer.h"
 #include "LocalSocketIpcClient.h"
 #include <QWheelEvent>
 #include <QFile>
 #include <QScrollbar>
+#include <QScreen>
 using namespace std;
 
 const QString SEP1 = " ### ";
 
 avsViewer::avsViewer(QWidget *parent, QString path, double mult, QString ipcID, QString matrix)
-    : QWidget(parent), ui(), m_env(NULL), m_inf(), m_clip(), m_frameCount(100), m_current(-1),
+    : QWidget(parent), ui(), m_env(nullptr), m_inf(), m_clip(), m_frameCount(100), m_current(-1),
         m_currentInput(path), m_version(QString()), m_avsModified(QString()),
         m_inputPath(QString()), m_res(NULL), m_mult(mult), m_currentImage(),
         m_dualView(false), m_desktopWidth(1920), m_desktopHeight(1080),
-        m_ipcID(ipcID), m_currentContent(QString()), m_ipcServer(NULL), m_ipcClient(NULL),
-        m_matrix(matrix), m_showLabel(new QLabel()), m_par(1), m_zoom(1),
+        m_ipcID(ipcID), m_currentContent(QString()), m_ipcServer(nullptr), m_ipcClient(nullptr),
+        m_matrix(matrix), m_showLabel(new QLabel()), m_zoom(1),
         m_currentFrameWidth(0), m_currentFrameHeight(0)
 {
   ui.setupUi(this);
@@ -51,11 +51,12 @@ avsViewer::avsViewer(QWidget *parent, QString path, double mult, QString ipcID, 
   ui.scrollArea->setWidget(m_showLabel);
   delete ui.openAvsPushButton;
 
-  QDesktopWidget *mydesk = QApplication::desktop();
-  cout << "Detected desktop resolution: " << mydesk->width() << "x" << mydesk->height() << ", pixel aspect ratio: "  << mydesk->devicePixelRatioF() << ", screen count: " << mydesk->screenCount() << endl;
-  m_par = mydesk->devicePixelRatioF();
-  m_desktopWidth = mydesk->width() / mydesk->screenCount();
-  m_desktopHeight = mydesk->height();
+  QScreen *screen = QGuiApplication::primaryScreen();
+  QRect  screenGeometry = screen->geometry();
+  int height = screenGeometry.height();
+  int width = screenGeometry.width();
+  m_desktopWidth = width;
+  m_desktopHeight = height;
   cout << "-> using desktop resolution: " << m_desktopWidth << "x" << m_desktopHeight << endl;
   this->init(0);
 }
@@ -63,8 +64,8 @@ avsViewer::avsViewer(QWidget *parent, QString path, double mult, QString ipcID, 
 void avsViewer::wheelEvent(QWheelEvent *event)
 {
   double movedby = event->angleDelta().y();
-  if (movedby != 0) {
-    int numSteps = movedby / 120 + m_current;
+  if (movedby != 0.0) {
+    int numSteps = int (movedby / 120 + m_current);
     if (numSteps < 0) {
       numSteps = 0;
     }
@@ -100,23 +101,20 @@ int avsViewer::invokeImportInternal(const char *inputFile)
     cerr << "Unknown C++ exception" << endl;
     return -1;
   }
-  return 0;
 }
 
 int avsViewer::import(const char *inputFile)
 {
-    cout << "import: " << inputFile << std::endl;
-  __try {
+  cout << "import: " << inputFile << std::endl;
+  try {
     if (invokeImportInternal(inputFile) != 0) {
       return -1;
     }
-  }
-  __except(1)
-  {
+    return 0;
+  } catch(...) {
     cerr << "-> Win32 exception" << endl;
     return -1;
   }
-  return 0;
 }
 
 int avsViewer::invokeInternal(const char *function)
@@ -124,6 +122,7 @@ int avsViewer::invokeInternal(const char *function)
   try {
     cout << qPrintable(" " + tr("invokeInternal:")) << " " << function << endl;
     m_res = m_env->Invoke(function, AVSValue(&m_res, 1)); //import current input to environment
+    return 0;
   } catch (AvisynthError &err) { //catch AvisynthErrors
     cerr << qPrintable(tr("Avisynth error ")) << function << ": " << err.msg << endl;
     return -1;
@@ -131,23 +130,21 @@ int avsViewer::invokeInternal(const char *function)
     cerr << qPrintable(tr("Unknown C++ exception,..")) << endl;
     return -1;
   }
-  return 0;
 }
 
 int avsViewer::invoke(const char *function)
 {
-  __try {
+  try {
     cout << "invoke: " << function << std::endl;
     if (invokeInternal(function) != 0) {
       return -1;
     }
-  }
-  __except(1)
-  {
+    return 0;
+  } catch(...) {
     cerr << " -> Win32 exception" << endl;
     return -1;
   }
-  return 0;
+
 }
 
 void avsViewer::on_jumpBackwardPushButton_clicked()
@@ -244,12 +241,13 @@ void avsViewer::on_saveImagePushButton_clicked()
 
 void avsViewer::cleanUp()
 {
-  if (m_env != NULL) {
+  if (m_env != nullptr) {
     cout << "Clean up old script environment,.." << endl;
     m_res = 0;
-    m_clip = 0;
+    m_clip =nullptr;
+    m_clip = nullptr;
     m_env->DeleteScriptEnvironment(); //delete the old script environment
-    m_env = NULL; // ensure new environment created next time
+    m_env = nullptr; // ensure new environment created next time
     m_current = 0;
   }
 }
@@ -500,23 +498,21 @@ void addHistrogramToContent(const QString content, QString &newContent, const QS
 
 void applyResolution(const QString& content, QString &newContent, double mult, const QString& resize)
 {
-  cout << "applyResolution: " << qPrintable(resize) << ", mult: " << mult << ", resize: " << qPrintable(resize) << endl;
-  if (resize == "None") {
+  if (resize == QString("None")) {
     return;
   }
+  cout << "applyResolution: " << qPrintable(resize) << ", mult: " << mult << ", resize: " << qPrintable(resize) << endl;
   if (newContent.isEmpty()) {
     newContent = content;
   }
   newContent = newContent.trimmed();
-  int index = newContent.indexOf("distributor()", Qt::CaseInsensitive);
-  cout << "index of 'distributor()': " << index << endl;
   QString resizer;
-  if (mult != 0 && mult != 1) {
-    resizer = resize + "Resize(Ceil(last.Width*" + QString::number(mult) + " -(Ceil(last.Width*" + QString::number(mult) + ") % 4)), last.Height)\n";
-  } else {
-    resizer = resize + "Resize(last.Width-last.Width% 4, last.Height)\n";
+  if (mult == 0.0) {
+     mult = 1.0;
   }
-  if (index != -1) {
+  resizer = resize + "Resize(Ceil(last.Width*" + QString::number(mult) + " -(Ceil(last.Width*" + QString::number(mult) + ") % 4)), last.Height)\n";
+  int index = newContent.indexOf("distributor()", Qt::CaseInsensitive);
+  if (index != -1) { // add before distributor
     newContent.insert(index, resizer);
     return;
   }
@@ -604,12 +600,12 @@ int avsViewer::init(int start)
     start = 0;
   }
   if (m_ipcID != QString()) {
-    if (m_ipcServer == NULL) {
+    if (m_ipcServer == nullptr) {
       cout << " starting ipc server, with serverName " << qPrintable(m_ipcID + "AVSVIEWER") << endl;
       m_ipcServer = new LocalSocketIpcServer(m_ipcID + "AVSVIEWER", this);
       connect(m_ipcServer, SIGNAL(messageReceived(QString)), this, SLOT(receivedMessage(QString)));
     }
-    if (m_ipcClient == NULL) {
+    if (m_ipcClient == nullptr) {
       cout << " starting ipc client with serverName " << qPrintable(m_ipcID + "HYBRID") << endl;
       m_ipcClient = new LocalSocketIpcClient(m_ipcID + "HYBRID", this);
     }
@@ -621,7 +617,7 @@ int avsViewer::init(int start)
     cerr << qPrintable(tr("Current input is empty,..")) << endl;
     return -1;
   }
-  if (m_env != NULL) { //if I do not abort here application will crash on 'm_res.AsClip()' later
+  if (m_env != nullptr) { //if I do not abort here application will crash on 'm_res.AsClip()' later
     cerr << qPrintable(tr("Init called on existing environment,..")) << endl;
     return -2;
   }
@@ -700,6 +696,7 @@ int avsViewer::init(int start)
       file.close();
       m_currentContent = content;
       m_dualView = content.contains("SourceFiltered = Source");
+
       checkInputType(content, ffmpegSource, mpeg2source, dgnvsource, ffms2Line);
       bool mpeg2info = mpeg2source;
       if (mpeg2info && content.contains("info=3")) {
@@ -819,8 +816,8 @@ int avsViewer::init(int start)
     }
     if (firstTime || ui.histogramCheckBox->isChecked() || !scrolling) {
       cout << qPrintable(" " + tr("resized label resolution %1x%2").arg(width).arg(height)) << endl;
-      m_showLabel->resize(width, height);
-      m_showLabel->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
+      //m_showLabel->resize(width, height);
+      //m_showLabel->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
     }
     cout << qPrintable(" " + tr("showing first frame,..")) << endl;
     this->showFrame(start); //show first frame
@@ -839,7 +836,7 @@ int avsViewer::init(int start)
     return -12;
   }
   cout << qPrintable(tr("finished initializing the avisynth script environment,..")) << endl;
-  if (m_ipcClient != NULL) {
+  if (m_ipcClient != nullptr) {
     m_ipcClient->send_MessageToServer("AvsViewer started ipcClient&Server with id " + m_ipcID);
   }
   if ((!firstTime && !ui.histogramCheckBox->isChecked()) || this->isFullScreen()) {
@@ -857,7 +854,9 @@ int avsViewer::init(int start)
  **/
 void avsViewer::on_frameHorizontalSlider_valueChanged(int value)
 {
-  cout << "slider changed to: " << value << endl;
+  if (value < 0) {
+    return;
+  }
   ui.frameNumberLabel->setText("(" + QString::number(value) + ")"); // update frame label
   if (!ui.frameHorizontalSlider->isSliderDown()) {
     this->showFrame(value); //show current frame
@@ -867,34 +866,44 @@ void avsViewer::on_frameHorizontalSlider_valueChanged(int value)
 /**
  * shows frame number i
  **/
-void avsViewer::showFrame(int i)
+void avsViewer::showFrame(const int& i)
 {
-  cout << " showFrame: " << i << endl;
-  cout << "  m_frameCount: " << m_frameCount << endl;
-  cout << "  m_env: " << int(m_env != NULL) << endl;
-  if (m_env == NULL || i > m_frameCount) {
+  if (m_env == nullptr || i > m_frameCount) {
     return;
   }
-
+  cout << " showFrame: " << i << endl;
+  cout << "  m_frameCount: " << m_frameCount << endl;
+  cout << "  m_env: " << int(m_env != nullptr) << endl;
   try {
     PVideoFrame f = m_clip->GetFrame(i, m_env); // get frame number i
-    if (m_mult == 0) {
-      m_mult = 1;
+    if (f == nullptr) {
+      cerr << " couldn't show frame (no frame: " << i << ")" << endl;
+      return;
     }
     int width = m_inf.width;
+    width += width%8;
     int height = m_inf.height;
-    cout << "frame resolution: " << width << "x" << height << endl;
-    QImage image(f->GetReadPtr(), width, height, QImage::Format_RGB32); //create a QImage
+    height += height%8;
+    cout << "avisynth frame resolution: " << width << "x" << height << endl;
+    if (m_mult == 0.0) {
+      m_mult = 1;
+    }
+    const unsigned char* data = f->GetReadPtr();
+    QImage image(data, width, height, QImage::Format_RGB32); //create a QImage
     m_showLabel->setText(QString());
     m_currentImage = image.mirrored(); // flip image otherwise it's upside down
-    if (!ui.scrollingCheckBox->isChecked()) {
-      m_showLabel->setPixmap(QPixmap::fromImage(m_currentImage).scaled(this->width()-8, this->height()-40, Qt::KeepAspectRatio, Qt::SmoothTransformation));
-    } else if (m_zoom != 1) {
-      m_showLabel->setPixmap(QPixmap::fromImage(m_currentImage).scaled(width*m_zoom, height*m_zoom, Qt::KeepAspectRatio, Qt::SmoothTransformation));
-    } else {
-      m_showLabel->setPixmap(QPixmap::fromImage(m_currentImage)); // addResolution does the resizing
+    QPixmap map;
+    if (!map.convertFromImage(m_currentImage)) {
+      cerr << " couldn't convert image data to pixmap,.. (" << i << ")" << endl;
+      return;
     }
-    //cout << "show frame: " << i << endl;
+    if (!ui.scrollingCheckBox->isChecked()) {
+      m_showLabel->setPixmap(map.scaled(this->width()-8, this->height()-40, Qt::KeepAspectRatio, Qt::SmoothTransformation));
+    } else if (m_zoom != 1.0) {
+      m_showLabel->setPixmap(map.scaled(int (width*m_zoom+0.5), int (height*m_zoom+0.5), Qt::KeepAspectRatio, Qt::SmoothTransformation));
+    } else {
+      m_showLabel->setPixmap(map); // addResolution does the resizing
+    }
     m_current = i; //set m_current to i
     ui.frameHorizontalSlider->setSliderPosition(m_current); // adjust the slider position
     QString title = tr("showing frame number: %1 of %2").arg(m_current).arg(m_frameCount); //adjust title bar;
@@ -903,7 +912,7 @@ void avsViewer::showFrame(int i)
     }
     this->setWindowTitle(title);
   } catch (...) {
-    cerr << " couldn't show frame,..." << endl;
+    cerr << " couldn't show frame,..." << "(" << i << ")" << endl;
   }
 }
 

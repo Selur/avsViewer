@@ -25,18 +25,14 @@ HEADERS += LocalSocketIpcServer.h \
     LocalSocketIpcClient.h \
     avsViewer.h \
     mywindows.h \
-    ImageResizer.h \
     MarkSlider.h \
-    ImageLabel.h \
     stdafx.h \
     avisynth.h \
     MoveScrollArea.h
 SOURCES += LocalSocketIpcServer.cpp \
     LocalSocketIpcClient.cpp \
     avsViewer.cpp \
-    ImageResizer.cpp \
     MarkSlider.cpp \
-    ImageLabel.cpp \
     interface.cpp \
     main.cpp \
     MoveScrollArea.cpp
