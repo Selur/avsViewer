@@ -276,7 +276,9 @@ void avsViewer::on_scrollingCheckBox_toggled()
 void avsViewer::on_aspectRatioAdjustmentComboBox_currentIndexChanged(QString value)
 {
   Q_UNUSED(value);
+  int curr = m_current;
   this->cleanUp();
+  m_current = curr;
   this->init(m_current);
 }
 
@@ -501,15 +503,15 @@ void applyResolution(const QString& content, QString &newContent, double mult, c
   if (resize == QString("None")) {
     return;
   }
+  if (mult == 0.0 || mult == 1.0) {
+     return;
+  }
   if (newContent.isEmpty()) {
     newContent = content;
   }
   newContent = newContent.trimmed();
   QString resizer;
-  if (mult == 0.0) {
-     mult = 1.0;
-  }
-  resizer = resize + "Resize(Ceil(last.Width*" + QString::number(mult) + " -(Ceil(last.Width*" + QString::number(mult) + ") % 2)), last.Height)\n";
+  resizer = resize + "Resize(Ceil(last.Width*" + QString::number(mult) + ")), last.Height)\n";
   int index = newContent.indexOf("distributor()", Qt::CaseInsensitive);
   if (index != -1) { // add before distributor
     newContent.insert(index, resizer);
@@ -636,8 +638,7 @@ int avsViewer::init(int start)
       return -4;
     }
     cout << qPrintable(" " + tr("Loaded avisynth dll,..")) << endl;
-    IScriptEnvironment* (*CreateScriptEnvironment)(
-        int version) = (IScriptEnvironment*(*)(int)) avsDLL.resolve("CreateScriptEnvironment"); //resolve CreateScriptEnvironment from the dll
+    IScriptEnvironment* (*CreateScriptEnvironment)(int version) = (IScriptEnvironment*(*)(int)) avsDLL.resolve("CreateScriptEnvironment"); //resolve CreateScriptEnvironment from the dll
     cout << qPrintable(" " + tr("Loaded CreateScriptEnvironment definition from dll,..")) << endl;
     m_env = CreateScriptEnvironment(AVISYNTH_INTERFACE_VERSION); //create a new IScriptEnvironment
     if (!m_env) { //abort if IScriptEnvironment couldn't be created
@@ -815,8 +816,6 @@ int avsViewer::init(int start)
     }
     if (firstTime || ui.histogramCheckBox->isChecked() || !scrolling) {
       cout << qPrintable(" " + tr("resized label resolution %1x%2").arg(width).arg(height)) << endl;
-      //m_showLabel->resize(width, height);
-      //m_showLabel->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
     }
     cout << qPrintable(" " + tr("showing first frame,..")) << endl;
     this->showFrame(start); //show first frame
@@ -843,7 +842,6 @@ int avsViewer::init(int start)
   }
 
   if (!scrolling) {
-    cout << "scrollArea size(3), width: " << ui.scrollArea->width() << ", height: " << ui.scrollArea->height() << std::endl;
     m_showLabel->resize(ui.scrollArea->size());
   }
   return 0;
@@ -882,11 +880,14 @@ void avsViewer::showFrame(const int& i)
     int width = m_inf.width;
     int height = m_inf.height;
     cout << "avisynth frame resolution: " << width << "x" << height << endl;
-    if (m_mult == 0.0) {
-      m_mult = 1;
-    }
+    int fill = width%8;
+    width += fill;
     const unsigned char* data = f->GetReadPtr();
     QImage image(data, width, height, QImage::Format_RGB32); //create a QImage
+    cout << "fill: " << fill << endl;
+    if (fill > 0) {
+      image = image.copy(0,0,width-fill, height);
+    }
     m_showLabel->setText(QString());
     m_currentImage = image.mirrored(); // flip image otherwise it's upside down
     QPixmap map;
@@ -894,13 +895,15 @@ void avsViewer::showFrame(const int& i)
       cerr << " couldn't convert image data to pixmap,.. (" << i << ")" << endl;
       return;
     }
+    m_showLabel->setPixmap(map);
     if (!ui.scrollingCheckBox->isChecked()) {
       m_showLabel->setPixmap(map.scaled(this->width()-8, this->height()-40, Qt::KeepAspectRatio, Qt::SmoothTransformation));
     } else if (m_zoom != 1.0) {
       m_showLabel->setPixmap(map.scaled(int (width*m_zoom+0.5), int (height*m_zoom+0.5), Qt::KeepAspectRatio, Qt::SmoothTransformation));
     } else {
-      m_showLabel->setPixmap(map); // addResolution does the resizing
+      m_showLabel->setPixmap(map);
     }
+
     m_current = i; //set m_current to i
     ui.frameHorizontalSlider->setSliderPosition(m_current); // adjust the slider position
     QString title = tr("showing frame number: %1 of %2").arg(m_current).arg(m_frameCount); //adjust title bar;
