@@ -53,6 +53,10 @@ class avsViewer : public QWidget
     QString fillUp(int number);
     void callMethod(const QString& typ, const QString& value, const QString &input);
     void cleanUp();
+    void addBordersForFill(int &width);
+    void cropForFill(QImage& image, int &width, const int &height);
+    int m_fill;
+    bool m_noAddBorders;
 
   private slots:
     void on_frameHorizontalSlider_valueChanged(int value);

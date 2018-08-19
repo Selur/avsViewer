@@ -32,7 +32,7 @@ avsViewer::avsViewer(QWidget *parent, QString path, double mult, QString ipcID, 
         m_dualView(false), m_desktopWidth(1920), m_desktopHeight(1080),
         m_ipcID(ipcID), m_currentContent(QString()), m_ipcServer(nullptr), m_ipcClient(nullptr),
         m_matrix(matrix), m_showLabel(new QLabel()), m_zoom(1),
-        m_currentFrameWidth(0), m_currentFrameHeight(0)
+        m_currentFrameWidth(0), m_currentFrameHeight(0), m_fill(0), m_noAddBorders(false)
 {
   ui.setupUi(this);
   QString stylepath = QApplication::applicationDirPath()+"/avsViewer.style";
@@ -234,9 +234,10 @@ void avsViewer::on_saveImagePushButton_clicked()
     return;
   }
   m_inputPath = getDirectory(input);
-  if (!m_currentImage.save(input, "PNG")) {
+  if (!m_currentImage.save(input, "PNG", 100)) {
     QMessageBox::warning(this, "Error", tr("Couldn't save %1").arg(input));
   }
+  this->showFrame(m_current);
 }
 
 void avsViewer::cleanUp()
@@ -244,11 +245,12 @@ void avsViewer::cleanUp()
   if (m_env != nullptr) {
     cout << "Clean up old script environment,.." << endl;
     m_res = 0;
-    m_clip =nullptr;
     m_clip = nullptr;
     m_env->DeleteScriptEnvironment(); //delete the old script environment
     m_env = nullptr; // ensure new environment created next time
     m_current = 0;
+    m_fill = 0;
+    m_noAddBorders = false;
   }
 }
 
@@ -860,6 +862,37 @@ void avsViewer::on_frameHorizontalSlider_valueChanged(int value)
   }
 }
 
+void avsViewer::addBordersForFill(int& width)
+{
+  if (m_fill == 0 || m_noAddBorders) {
+    return;
+  }
+  int add = 16-m_fill;
+  try {
+    AVSValue args[5] = {m_clip, 0, 0, add, 0};
+    m_clip = m_env->Invoke("AddBorders", AVSValue(args, 5)).AsClip();
+    m_inf = m_clip->GetVideoInfo();
+    width += add;
+    cout << " adding borders -> new clip resolution: " << m_inf.width << "x" << m_inf.height << endl;
+    m_noAddBorders = true;
+  } catch (AvisynthError &err) { //catch AvisynthErrors
+    cerr << qPrintable(tr("Avisynth error: ")) << err.msg << endl;
+  } catch (...) {
+    cerr << "AddBorder failed!" << endl;
+  }
+}
+
+void avsViewer::cropForFill(QImage& image, int& width, const int& height)
+{
+  if (m_fill == 0) {
+    return;
+  }
+  cout << " image resolution: " << image.width() << "x" << image.height() << endl;
+  width -= (16-m_fill);
+  image = image.copy(0, 0, width, height);
+  cout << " cropped -> new image resolution: " << image.width() << "x" << image.height() << endl;
+}
+
 /**
  * shows frame number i
  **/
@@ -872,22 +905,22 @@ void avsViewer::showFrame(const int& i)
   cout << "  m_frameCount: " << m_frameCount << endl;
   cout << "  m_env: " << int(m_env != nullptr) << endl;
   try {
+    int width = m_inf.width;
+    int height = m_inf.height;
+    cout << "avisynth frame resolution: " << width << "x" << height << endl;
+    if (m_fill == 0) {
+      m_fill = width%16;
+    }
+    this->addBordersForFill(width);
     PVideoFrame f = m_clip->GetFrame(i, m_env); // get frame number i
     if (f == nullptr) {
       cerr << " couldn't show frame (no frame: " << i << ")" << endl;
       return;
     }
-    int width = m_inf.width;
-    int height = m_inf.height;
-    cout << "avisynth frame resolution: " << width << "x" << height << endl;
-    int fill = width%8;
-    width += fill;
+
     const unsigned char* data = f->GetReadPtr();
     QImage image(data, width, height, QImage::Format_RGB32); //create a QImage
-    cout << "fill: " << fill << endl;
-    if (fill > 0) {
-      image = image.copy(0,0,width-fill, height);
-    }
+    this->cropForFill(image, width, height);
     m_showLabel->setText(QString());
     m_currentImage = image.mirrored(); // flip image otherwise it's upside down
     QPixmap map;
