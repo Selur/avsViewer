@@ -43,6 +43,8 @@ class avsViewer : public QWidget
     double m_zoom;
     int m_currentFrameWidth;
     int m_currentFrameHeight;
+    int m_fill;
+    bool m_noAddBorders;
     void showFrame(const int &frame);
     int init(int start = 0);
     int import(const char *inputFile);
@@ -55,8 +57,8 @@ class avsViewer : public QWidget
     void cleanUp();
     void addBordersForFill(int &width);
     void cropForFill(QImage& image, int &width, const int &height);
-    int m_fill;
-    bool m_noAddBorders;
+    void refresh();
+    void changeTo(const QString& input, const QString& value);
 
   private slots:
     void on_frameHorizontalSlider_valueChanged(int value);

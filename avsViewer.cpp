@@ -106,12 +106,13 @@ int avsViewer::invokeImportInternal(const char *inputFile)
 int avsViewer::import(const char *inputFile)
 {
   cout << "import: " << inputFile << std::endl;
-  try {
+  __try  {
     if (invokeImportInternal(inputFile) != 0) {
       return -1;
     }
     return 0;
-  } catch(...) {
+  }
+  __except(1) {
     cerr << "-> Win32 exception" << endl;
     return -1;
   }
@@ -120,7 +121,7 @@ int avsViewer::import(const char *inputFile)
 int avsViewer::invokeInternal(const char *function)
 {
   try {
-    cout << qPrintable(" " + tr("invokeInternal:")) << " " << function << endl;
+    cout << qPrintable(tr("invokeInternal: ")) << function << endl;
     m_res = m_env->Invoke(function, AVSValue(&m_res, 1)); //import current input to environment
     return 0;
   } catch (AvisynthError &err) { //catch AvisynthErrors
@@ -134,13 +135,14 @@ int avsViewer::invokeInternal(const char *function)
 
 int avsViewer::invoke(const char *function)
 {
-  try {
+  __try {
     cout << "invoke: " << function << std::endl;
     if (invokeInternal(function) != 0) {
       return -1;
     }
     return 0;
-  } catch(...) {
+  }
+  __except(1) {
     cerr << " -> Win32 exception" << endl;
     return -1;
   }
@@ -251,37 +253,38 @@ void avsViewer::cleanUp()
     m_current = 0;
     m_fill = 0;
     m_noAddBorders = false;
+    qApp->processEvents();
   }
+}
+
+void avsViewer::refresh()
+{
+  int curr = m_current;
+  this->cleanUp();
+  m_current = curr;
+  this->init(m_current);
 }
 
 void avsViewer::on_infoCheckBox_toggled()
 {
-  this->cleanUp();
-  this->init(m_current);
+  this->refresh();
 }
 
 void avsViewer::on_histogramCheckBox_toggled()
 {
-  this->cleanUp();
-  this->init(m_current);
+  this->refresh();
 }
 
 
 void avsViewer::on_scrollingCheckBox_toggled()
 {
-  int curr = m_current;
-  this->cleanUp();
-  m_current = curr;
-  this->init(m_current);
+  this->refresh();
 }
 
 void avsViewer::on_aspectRatioAdjustmentComboBox_currentIndexChanged(QString value)
 {
   Q_UNUSED(value);
-  int curr = m_current;
-  this->cleanUp();
-  m_current = curr;
-  this->init(m_current);
+  this->refresh();
 }
 
 void avsViewer::fromConsoleReader(QString text)
@@ -564,6 +567,22 @@ QString getCurrentInput(const QString& script)
   return input;
 }
 
+void avsViewer::changeTo(const QString& input, const QString& value)
+{
+  int currentPosition = 0;
+  QString currentInput = getCurrentInput(m_currentContent); // the input of the avisynth script
+  if (currentInput == input) {
+    currentPosition = m_current;
+  }
+  m_currentFrameWidth = m_inf.width;
+  m_currentFrameHeight = m_inf.height;
+  this->killEnv();
+  m_currentInput = value; //set current input
+  cout << "Change current input to: " << qPrintable(m_currentInput) << endl;
+  m_showLabel->setText(tr("Preparing environment for %1").arg(m_currentInput));
+  this->init(currentPosition);
+}
+
 void avsViewer::callMethod(const QString& typ, const QString& value, const QString &input)
 {
   cout << "callmethod: " << qPrintable(typ) << ", value "<< qPrintable(value) << ", input " << qPrintable(input) << std::endl;
@@ -573,21 +592,7 @@ void avsViewer::callMethod(const QString& typ, const QString& value, const QStri
   }
   this->setWindowTitle(QString("%1, %2:\n%3").arg(typ).arg(value).arg(input));
   if (typ == "changeTo") {
-    int currentPosition = 0;
-    QString currentInput = getCurrentInput(m_currentContent); // the input of the avisynth script
-    if (currentInput == input) {
-      currentPosition = m_current;
-    }
-    m_currentFrameWidth = m_inf.width;
-    m_currentFrameHeight = m_inf.height;
-    this->killEnv();
-    m_currentInput = value; //set current input
-    cout << "Change current input to: " << qPrintable(m_currentInput) << endl;
-    m_showLabel->setText(tr("Preparing environment for %1").arg(m_currentInput));
-    this->init(currentPosition);
-    m_currentFrameWidth = 0;
-    m_currentFrameHeight = 0;
-    qApp->processEvents();
+    this->changeTo(input, value);
     return;
   }
   cerr << "unsupported typ: " << qPrintable(typ) << endl;
@@ -613,7 +618,6 @@ int avsViewer::init(int start)
       m_ipcClient = new LocalSocketIpcClient(m_ipcID + "HYBRID", this);
     }
   }
-
   m_current = -1; //reset frameIndex
   cout << qPrintable(tr("Initializing the avisynth script environment,..")) << endl;
   if (m_currentInput.isEmpty()) {
@@ -674,7 +678,6 @@ int avsViewer::init(int start)
       ui.scrollArea->horizontalScrollBar()->resize(0, 0);
       ui.scrollArea->horizontalScrollBar()->hide();
     }
-
     QString newContent, input = m_currentInput;
     bool invokeFFInfo = false;
     QFile file(input);
@@ -726,7 +729,6 @@ int avsViewer::init(int start)
         input = m_avsModified;
       }
     }
-
     cout << qPrintable(" " + tr("Importing: %1 into the environment,.. ").arg(input)) << endl;
     const char* infile = input.toLocal8Bit(); //convert input name to char*
     cout << "importing " << infile << std::endl;
@@ -818,6 +820,8 @@ int avsViewer::init(int start)
     }
     if (firstTime || ui.histogramCheckBox->isChecked() || !scrolling) {
       cout << qPrintable(" " + tr("resized label resolution %1x%2").arg(width).arg(height)) << endl;
+      m_showLabel->resize(width, height);
+      m_showLabel->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
     }
     cout << qPrintable(" " + tr("showing first frame,..")) << endl;
     this->showFrame(start); //show first frame
@@ -842,7 +846,6 @@ int avsViewer::init(int start)
   if ((!firstTime && !ui.histogramCheckBox->isChecked()) || this->isFullScreen()) {
     return 0;
   }
-
   if (!scrolling) {
     m_showLabel->resize(ui.scrollArea->size());
   }
@@ -951,12 +954,14 @@ void avsViewer::showFrame(const int& i)
 
 void avsViewer::killEnv()
 {
+  cout << "KILL environment" << endl;
   this->cleanUp();
   if (!m_avsModified.isEmpty()) {
     QFile::remove(m_avsModified);
     m_avsModified = QString();
   }
   ui.frameHorizontalSlider->resetMarks();
+  cout << "Cleaned environment" << endl;
 }
 
 void avsViewer::on_jumpToStartPushButton_clicked()
