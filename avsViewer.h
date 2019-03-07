@@ -10,6 +10,7 @@
 #include <QString>
 #include <QPixmap>
 #include <QLabel>
+#include <QFile>
 
 class IScriptEnvironment;
 class LocalSocketIpcServer;
@@ -20,7 +21,7 @@ class avsViewer : public QWidget
 {
   Q_OBJECT
   public:
-    avsViewer(QWidget *parent, QString path, double mult, QString ipcID, QString matrix);
+    avsViewer(QWidget *parent, const QString &path, const double &mult, const QString &ipcID, const QString &matrix);
     ~avsViewer();
 
   private:
@@ -59,6 +60,10 @@ class avsViewer : public QWidget
     void cropForFill(QImage& image, int &width, const int &height);
     void refresh();
     void changeTo(const QString& input, const QString& value);
+    void adjustWindowSize(const bool& adjust, const int& width, const int& height);
+    void adjustLabelSize(const bool& adjust, const int& width, const int& height);
+    void adjustToVideoInfo(const bool& scrolling, const bool& first, int& width, int& height, bool &changeLabelSize);
+    void outputColorSpaceInfo() const;
 
   private slots:
     void on_frameHorizontalSlider_valueChanged(int value);
@@ -69,7 +74,7 @@ class avsViewer : public QWidget
     void on_infoCheckBox_toggled();
     void on_histogramCheckBox_toggled();
     void on_saveImagePushButton_clicked();
-    void on_aspectRatioAdjustmentComboBox_currentIndexChanged(QString value);
+    void on_aspectRatioAdjustmentComboBox_currentIndexChanged(const QString &value);
     void fromConsoleReader(QString text);
     void receivedMessage(const QString& message);
     void on_jumpBackwardPushButton_clicked();

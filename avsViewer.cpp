@@ -19,13 +19,13 @@
 #include "LocalSocketIpcClient.h"
 #include <QWheelEvent>
 #include <QFile>
-#include <QScrollbar>
+#include <QScrollBar>
 #include <QScreen>
 using namespace std;
 
 const QString SEP1 = " ### ";
 
-avsViewer::avsViewer(QWidget *parent, QString path, double mult, QString ipcID, QString matrix)
+avsViewer::avsViewer(QWidget *parent, const QString& path, const double& mult, const QString& ipcID, const QString& matrix)
     : QWidget(parent), ui(), m_env(nullptr), m_inf(), m_clip(), m_frameCount(100), m_current(-1),
         m_currentInput(path), m_version(QString()), m_avsModified(QString()),
         m_inputPath(QString()), m_res(NULL), m_mult(mult), m_currentImage(),
@@ -202,7 +202,7 @@ QString removeLastSeparatorFromPath(QString input)
   return input.remove(size - 1, 1);
 }
 
-QString getDirectory(const QString input)
+QString getDirectory(const QString& input)
 {
   if (input.isEmpty()) {
     return QString();
@@ -281,7 +281,7 @@ void avsViewer::on_scrollingCheckBox_toggled()
   this->refresh();
 }
 
-void avsViewer::on_aspectRatioAdjustmentComboBox_currentIndexChanged(QString value)
+void avsViewer::on_aspectRatioAdjustmentComboBox_currentIndexChanged(const QString& value)
 {
   Q_UNUSED(value);
   this->refresh();
@@ -304,7 +304,7 @@ QString removeQuotes(QString input)
   return ret;
 }
 
-QString getWholeFileName(const QString input)
+QString getWholeFileName(const QString& input)
 {
   if (input.isEmpty()) {
     return QString();
@@ -320,7 +320,7 @@ QString getWholeFileName(const QString input)
   return QDir::toNativeSeparators(output);
 }
 
-QString getFileName(const QString input)
+QString getFileName(const QString& input)
 {
   if (input.isEmpty()) {
     return QString();
@@ -333,7 +333,7 @@ QString getFileName(const QString input)
   return output;
 }
 
-int saveTextTo(QString text, QString to)
+int saveTextTo(const QString& text, const QString& to)
 {
   if (text.isEmpty()) {
     return -1;
@@ -352,8 +352,7 @@ int saveTextTo(QString text, QString to)
   return -1;
 }
 
-void checkInputType(const QString content, bool &ffmpegSource, bool &mpeg2source, bool &dgnvsource,
-    QString &ffms2Line)
+void checkInputType(const QString& content, bool &ffmpegSource, bool &mpeg2source, bool &dgnvsource, QString &ffms2Line)
 {
   bool ffms2Avs = false;
   foreach(QString line, content.split("\n"))
@@ -389,14 +388,14 @@ void checkInputType(const QString content, bool &ffmpegSource, bool &mpeg2source
 }
 
 void addShowInfoToContent(const int distributorIndex, const bool ffmpegSource,
-    const QString content, QString &newContent, const bool ffms2Avs, const QString ffms2Line,
+    const QString& content, QString &newContent, const QString& ffms2Line,
     bool &invokeFFInfo, const bool mpeg2source, const bool dgnvsource)
 {
   if (ffmpegSource) {
     if (distributorIndex != -1) { // contains distributor
       newContent = content;
       newContent = newContent.remove(distributorIndex, newContent.size()).trimmed();
-      if (!ffms2Avs && !ffms2Line.isEmpty()) {
+      if (!ffms2Line.isEmpty()) {
         newContent += "\n";
         newContent += "Import(\"" + ffms2Line + "\")";
       }
@@ -408,7 +407,7 @@ void addShowInfoToContent(const int distributorIndex, const bool ffmpegSource,
       newContent += "distributor()";
       newContent += "\n";
       newContent += "return last";
-    } else if (!ffms2Avs && !ffms2Line.isEmpty()) {
+    } else if (!ffms2Line.isEmpty()) {
       newContent = content;
       int index = newContent.lastIndexOf("return");
       if (index != -1) {
@@ -452,7 +451,7 @@ void addShowInfoToContent(const int distributorIndex, const bool ffmpegSource,
       newContent += "return last";}
 }
 
-void addHistrogramToContent(const QString content, QString &newContent, const QString& matrix)
+void addHistrogramToContent(const QString& content, QString &newContent, const QString& matrix)
 {
   cout << "Calling histogram with matrix " << qPrintable(matrix) << endl;
   if (newContent.isEmpty()) {
@@ -516,7 +515,7 @@ void applyResolution(const QString& content, QString &newContent, double mult, c
   }
   newContent = newContent.trimmed();
   QString resizer;
-  resizer = resize + "Resize(Ceil(last.Width*" + QString::number(mult) + ")), last.Height)\n";
+  resizer = resize + "Resize(Ceil(last.Width*" + QString::number(mult) + "), last.Height)\n";
   int index = newContent.indexOf("distributor()", Qt::CaseInsensitive);
   if (index != -1) { // add before distributor
     newContent.insert(index, resizer);
@@ -534,6 +533,9 @@ void applyResolution(const QString& content, QString &newContent, double mult, c
 void avsViewer::receivedMessage(const QString& message)
 {
   cout << "got message: " << qPrintable(message) << endl;
+  if (message.isEmpty()) {
+    return;
+  }
   this->setWindowTitle(message);
   QStringList typeAndValue = message.split(SEP1);
   switch (typeAndValue.count())
@@ -571,14 +573,26 @@ void avsViewer::changeTo(const QString& input, const QString& value)
 {
   int currentPosition = 0;
   QString currentInput = getCurrentInput(m_currentContent); // the input of the avisynth script
-  if (currentInput == input) {
+  QFile file(value);
+  QString newContent;
+  if (file.open(QIODevice::ReadOnly)) {
+    newContent = file.readAll();
+    file.close();
+  }
+  QString newInput = getCurrentInput(newContent); // the input of the avisynth script
+  if (newInput.isEmpty()) {
+    newInput = input;
+  }
+  if (currentInput == newInput) { // input didn't change keeping position
     currentPosition = m_current;
   }
-  m_currentFrameWidth = m_inf.width;
-  m_currentFrameHeight = m_inf.height;
-  this->killEnv();
+  if (m_currentFrameWidth == 0) {
+    m_currentFrameWidth = m_inf.width;
+    m_currentFrameHeight = m_inf.height;
+  }
+
+  this->killEnv(); // killing old Avisynth environment
   m_currentInput = value; //set current input
-  cout << "Change current input to: " << qPrintable(m_currentInput) << endl;
   m_showLabel->setText(tr("Preparing environment for %1").arg(m_currentInput));
   this->init(currentPosition);
 }
@@ -631,6 +645,7 @@ int avsViewer::init(int start)
   bool firstTime = this->minimumSize().width() == 0;
   cout << " first time: " << (firstTime ? "true" : "false") << std::endl;
   bool scrolling = ui.scrollingCheckBox->isChecked();
+  bool changeLabelSize = false;
   cout << " scrolling: " << (scrolling ? "true" : "false") << std::endl;
   try { // load script
     QLibrary avsDLL("avisynth.dll");
@@ -681,12 +696,11 @@ int avsViewer::init(int start)
     QString newContent, input = m_currentInput;
     bool invokeFFInfo = false;
     QFile file(input);
-    bool ffmpegSource = false;
-    bool showInfo = false;
-    bool mpeg2source = false;
-    bool dgnvsource = false;
-    bool ffms2Avs = false;
     if (file.open(QIODevice::ReadOnly)) {
+      bool ffmpegSource = false;
+      bool showInfo = false;
+      bool mpeg2source = false;
+      bool dgnvsource = false;
       QString content = file.readAll(), ffms2Line;
       QStringList lines = content.split("\n");
       QStringList nocomments;
@@ -703,15 +717,11 @@ int avsViewer::init(int start)
       m_dualView = content.contains("SourceFiltered = Source");
 
       checkInputType(content, ffmpegSource, mpeg2source, dgnvsource, ffms2Line);
-      bool mpeg2info = mpeg2source;
-      if (mpeg2info && content.contains("info=3")) {
-        mpeg2info = false;
-      }
       ui.infoCheckBox->setEnabled(true);
       showInfo = ui.infoCheckBox->isChecked();
       if (showInfo) {
         int index = content.indexOf("distributor()", Qt::CaseInsensitive);
-        addShowInfoToContent(index, ffmpegSource, content, newContent, ffms2Avs, ffms2Line, invokeFFInfo, mpeg2source, dgnvsource);
+        addShowInfoToContent(index, ffmpegSource, content, newContent, ffms2Line, invokeFFInfo, mpeg2source, dgnvsource);
       }
       if (ui.histogramCheckBox->isChecked()) {
         addHistrogramToContent(content, newContent, m_matrix);
@@ -749,30 +759,14 @@ int avsViewer::init(int start)
     m_clip = m_res.AsClip(); //get clip
     cout << qPrintable(" " + tr("Grabbing clip infos,..")) << endl;
     m_inf = m_clip->GetVideoInfo(); //get clip infos
+
     if (!m_inf.HasVideo()) { //abort if clip has no video
       cerr << qPrintable(tr("Input has no video stream -> aborting")) << endl;
       return -8;
     }
-    cout << qPrintable(" " + tr("Checking colorspace,..")) << endl;
     bool reload = false;
-    if (m_inf.IsRGB32()) {
-      cout << qPrintable("  " + tr("current color space is RGB32")) << endl;
-    } else {
-      if (m_inf.IsRGB()) {
-        cout << qPrintable("  " + tr("current color space is RGB")) << endl;
-      } else if (m_inf.IsYV12()) {
-        cout << qPrintable("  " + tr("current color space is Yv12")) << endl;
-      } else if (m_inf.IsRGB24()) {
-        cout << qPrintable("  " + tr("current color space is RGB24")) << endl;
-      } else if (m_inf.IsRGB32()) {
-        cout << qPrintable("  " + tr("current color space is RGB32")) << endl;
-      } else if (m_inf.IsYUY2()) {
-        cout << qPrintable("  " + tr("current color space is YUY2")) << endl;
-      } else if (m_inf.IsYUV()) {
-        cout << qPrintable("  " + tr("current color space is YUV")) << endl;
-      } else {
-        cout << qPrintable("  " + tr("current color space is unknown")) << endl;
-      }
+    this->outputColorSpaceInfo();
+    if (!m_inf.IsRGB32()) { // make sure color is RGB32
       if (this->invoke("ConvertToRGB32") != 0) {
         cerr << qPrintable(tr("Couldn't invoke 'ConvertToTGB()' -> aborting")) << endl;
         this->killEnv();
@@ -794,44 +788,15 @@ int avsViewer::init(int start)
       cout << qPrintable(" " + tr("Grabbing clip infos,..")) << endl;
       m_inf = m_clip->GetVideoInfo(); // update clip info
     }
-    cout << qPrintable(" " + tr("Grabbing clip length,..")) << endl;
-    m_frameCount = m_inf.num_frames; //get frame count
-    cout << qPrintable(" -> " + tr("Clip contains: %1 frames").arg(m_frameCount)) << endl;
+    int width = 0, height = 0;
+    this->adjustToVideoInfo(scrolling, firstTime, width, height, changeLabelSize);
     cout << qPrintable(" " + tr("Adjusting slider to frame count,..")) << endl;
     ui.frameHorizontalSlider->setMaximum(m_frameCount -1);
     ui.jumpToSpinBox->setMaximum(m_frameCount -1);
     ui.frameHorizontalSlider->resetMarks();
-    int width = m_inf.width;
-    int height = m_inf.height;
-    if (m_currentFrameWidth != 0) {
-      width = m_currentFrameWidth;
-      height = m_currentFrameHeight;
-    }
-    if (!scrolling) {
-      if (firstTime) {
-        while (width > (m_desktopWidth - 50) || height > (m_desktopHeight - 50)) {
-          width *= 0.9;
-          height *= 0.9;
-        }
-      } else {
-        width = ui.scrollArea->width();
-        height = ui.scrollArea->height();
-      }
-    }
-    if (firstTime || ui.histogramCheckBox->isChecked() || !scrolling) {
-      cout << qPrintable(" " + tr("resized label resolution %1x%2").arg(width).arg(height)) << endl;
-      m_showLabel->resize(width, height);
-      m_showLabel->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
-    }
-    cout << qPrintable(" " + tr("showing first frame,..")) << endl;
-    this->showFrame(start); //show first frame
-    if (width > height) {
-      this->resize(this->width(), this->sizeHint().height());
-    } else if (width < height){
-      this->resize(this->sizeHint().width(), this->height());
-    } else {
-      this->adjustSize();
-    }
+    this->adjustLabelSize(changeLabelSize && (firstTime || ui.histogramCheckBox->isChecked() || !scrolling), width, height); // adjust label size
+    this->showFrame(start); //show frame
+    this->adjustWindowSize(changeLabelSize, width, height);
   } catch (AvisynthError &err) { //catch AvisynthErrors
     cerr << qPrintable(tr("-> Avisynth error: %1").arg(err.msg)) << endl;
     return -11;
@@ -846,11 +811,90 @@ int avsViewer::init(int start)
   if ((!firstTime && !ui.histogramCheckBox->isChecked()) || this->isFullScreen()) {
     return 0;
   }
-  if (!scrolling) {
+  if (changeLabelSize && !scrolling) {
     m_showLabel->resize(ui.scrollArea->size());
   }
   return 0;
 }
+
+void avsViewer::outputColorSpaceInfo() const
+{
+  cout << qPrintable(" " + tr("Checking colorspace,..")) << endl;
+  if (m_inf.IsRGB32()) {
+    cout << qPrintable("  " + tr("current color space is RGB32")) << endl;
+  } else if (m_inf.IsRGB()) {
+    cout << qPrintable("  " + tr("current color space is RGB")) << endl;
+  } else if (m_inf.IsYV12()) {
+    cout << qPrintable("  " + tr("current color space is Yv12")) << endl;
+  } else if (m_inf.IsRGB24()) {
+    cout << qPrintable("  " + tr("current color space is RGB24")) << endl;
+  } else if (m_inf.IsYUY2()) {
+    cout << qPrintable("  " + tr("current color space is YUY2")) << endl;
+  } else if (m_inf.IsYUV()) {
+    cout << qPrintable("  " + tr("current color space is YUV")) << endl;
+  } else {
+    cout << qPrintable("  " + tr("current color space is unknown")) << endl;
+  }
+}
+
+void avsViewer::adjustToVideoInfo(const bool& scrolling, const bool& first, int& width, int& height, bool& changeLabelSize)
+{
+  m_frameCount = m_inf.num_frames; //get frame count
+  cout << qPrintable(" -> " + tr("Clip contains: %1 frames").arg(m_frameCount)) << endl;
+  width = m_inf.width;
+  height = m_inf.height;
+  if (m_currentFrameWidth != 0) {
+    width = m_currentFrameWidth;
+    height = m_currentFrameHeight;
+  } else {
+    m_currentFrameWidth = width;
+    m_currentFrameHeight = height;
+    changeLabelSize = true;
+  }
+  if (!scrolling) {
+    if (first) {
+      while (width > (m_desktopWidth - 50) || height > (m_desktopHeight - 50)) {
+        width *= 0.9;
+        height *= 0.9;
+      }
+    } else {
+      width = ui.scrollArea->width();
+      height = ui.scrollArea->height();
+    }
+  }
+}
+
+/**
+ * adjust the size of the label
+ **/
+void avsViewer::adjustLabelSize(const bool& adjust, const int& width, const int& height)
+{
+  if (!adjust) {
+    return;
+  }
+  m_showLabel->resize(width, height);
+  m_showLabel->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
+}
+
+
+/**
+ * adjust the size of the Window
+ **/
+void avsViewer::adjustWindowSize(const bool& adjust, const int& width, const int& height)
+{
+  if (!adjust) {
+    return;
+  }
+  if (width > height) {
+    this->resize(this->width(), this->sizeHint().height());
+  } else if (width < height){
+    this->resize(this->sizeHint().width(), this->height());
+  } else {
+    this->adjustSize();
+  }
+}
+
+
 /**
  * adjusts frame-index and frame to slider position
  **/
@@ -911,6 +955,7 @@ void avsViewer::showFrame(const int& i)
     int width = m_inf.width;
     int height = m_inf.height;
     cout << "avisynth frame resolution: " << width << "x" << height << endl;
+    cout << "current label resolution: " << m_currentFrameWidth << "x" << m_currentFrameHeight << endl;
     if (m_fill == 0) {
       m_fill = width%16;
     }
@@ -939,7 +984,9 @@ void avsViewer::showFrame(const int& i)
     } else {
       m_showLabel->setPixmap(map);
     }
-
+    m_currentFrameWidth = m_showLabel->width();
+    m_currentFrameHeight = m_showLabel->height();
+    cout << "-> updated label resolution: " << m_currentFrameWidth << "x" << m_currentFrameHeight << endl;
     m_current = i; //set m_current to i
     ui.frameHorizontalSlider->setSliderPosition(m_current); // adjust the slider position
     QString title = tr("showing frame number: %1 of %2").arg(m_current).arg(m_frameCount); //adjust title bar;

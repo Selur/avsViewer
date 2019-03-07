@@ -66,7 +66,7 @@ void LocalSocketIpcServer::socket_disconnected()
   m_clientConnection->deleteLater();
   m_clientConnection = nullptr;
 }
-
+#include <iostream>
 void LocalSocketIpcServer::socket_readReady()
 {
   if (m_clientConnection == nullptr) {
@@ -78,15 +78,15 @@ void LocalSocketIpcServer::socket_readReady()
   std::cout << "[avsViewer Server]: connection readable", (m_clientConnection->isReadable() ? "true" : "false"))  << std::endl;
 #endif
   QDataStream in(m_clientConnection);
-  in.setVersion(QDataStream::Qt_4_0);
+  in.setVersion(QDataStream::Qt_5_5);
   try {
-    while (m_clientConnection != nullptr && m_clientConnection->bytesAvailable() >= (int) sizeof(quint16)) {
-      QString message;
+    while (m_clientConnection != nullptr && m_clientConnection->bytesAvailable() >= int(sizeof(quint16))) {
+      QByteArray message;
       in >> message;
   #ifdef QT_DEBUG
       std::cout << "[avsViewer Server]: Message received:" << qPrintable(message) << std::endl;
   #endif
-      emit messageReceived(message);
+      emit messageReceived(QString::fromUtf8(message));
     }
   } catch (...) {
 #ifdef QT_DEBUG

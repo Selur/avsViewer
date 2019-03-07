@@ -19,15 +19,14 @@ LocalSocketIpcClient::LocalSocketIpcClient(QString remoteServername, QObject *pa
   connect(m_socket, SIGNAL(disconnected()), this, SLOT(socket_disconnected()));
 
   connect(m_socket, SIGNAL(readyRead()), this, SLOT(socket_readReady()));
-  connect(m_socket, SIGNAL(error(QLocalSocket::LocalSocketError)), this,
-      SLOT(socket_error(QLocalSocket::LocalSocketError)));
+  connect(m_socket, SIGNAL(error(QLocalSocket::LocalSocketError)), this, SLOT(socket_error(QLocalSocket::LocalSocketError)));
 }
 
 LocalSocketIpcClient::~LocalSocketIpcClient()
 {
   m_socket->abort();
   delete m_socket;
-  m_socket = NULL;
+  m_socket = nullptr;
 }
 
 void LocalSocketIpcClient::send_MessageToServer(QString message)
@@ -42,9 +41,9 @@ void LocalSocketIpcClient::socket_connected()
 {
   QByteArray block;
   QDataStream out(&block, QIODevice::WriteOnly);
-  out.setVersion(QDataStream::Qt_4_6);
+  out.setVersion(QDataStream::Qt_5_5);
   std::cout << "avsViewer sending message " << qPrintable(m_message) << std::endl;
-  out << m_message;
+  out << m_message.toUtf8();
   out.device()->seek(0);
   m_socket->write(block);
   m_socket->flush();
