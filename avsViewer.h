@@ -65,6 +65,8 @@ class avsViewer : public QWidget
     void adjustToVideoInfo(const bool& scrolling, const bool& first, int& width, int& height, bool &changeLabelSize);
     void showVideoInfo();
     void initIPC();
+    void sendMessageToSever(const QString& message);
+    QString getCurrentInput(const QString& script);
   private slots:
     void on_frameHorizontalSlider_valueChanged(int value);
     void on_nextPushButton_clicked();
