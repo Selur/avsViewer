@@ -1,6 +1,4 @@
 #include "avsViewer.h"
-#include "mywindows.h"
-#include "avisynth.h"
 #include <conio.h>
 #include <QFile>
 #include <QPixmap>
@@ -24,15 +22,16 @@
 using namespace std;
 
 const QString SEP1 = " ### ";
+const AVS_Linkage *AVS_linkage = nullptr;
 
 avsViewer::avsViewer(QWidget *parent, const QString& path, const double& mult, const QString& ipcID, const QString& matrix)
-    : QWidget(parent), ui(), m_env(nullptr), m_inf(), m_clip(), m_frameCount(100), m_current(-1),
+    : QWidget(parent), ui(), m_frameCount(100), m_current(-1),
         m_currentInput(path), m_version(QString()), m_avsModified(QString()),
-        m_inputPath(QString()), m_res(NULL), m_mult(mult), m_currentImage(),
+        m_inputPath(QString()), m_res(0), m_mult(mult), m_currentImage(),
         m_dualView(false), m_desktopWidth(1920), m_desktopHeight(1080),
         m_ipcID(ipcID), m_currentContent(QString()), m_ipcServer(nullptr), m_ipcClient(nullptr),
         m_matrix(matrix), m_showLabel(new QLabel()), m_zoom(1),
-        m_currentFrameWidth(0), m_currentFrameHeight(0), m_fill(0), m_noAddBorders(false)
+        m_currentFrameWidth(0), m_currentFrameHeight(0), m_fill(0), m_noAddBorders(false), m_env(nullptr)
 {
   ui.setupUi(this);
   QString stylepath = QApplication::applicationDirPath()+"/avsViewer.style";
@@ -87,66 +86,65 @@ avsViewer::~avsViewer()
   cout << qPrintable(tr("finished,...")) << endl;
 }
 
-int avsViewer::invokeImportInternal(const char *inputFile)
+bool avsViewer::initEnv()
+{
+  QLibrary avsDLL("AviSynth.dll");
+  if (!avsDLL.load()) { //load avisynth.dll if it's not already loaded and abort if it couldn't be loaded
+    QString error = avsDLL.errorString();
+    if (!error.isEmpty()) {
+      std::cerr << "Could not load avisynth.dll! " << std::endl << qPrintable(error) << std::endl;
+      return false;
+    }
+    std::cerr << "Could not load avisynth.dll!" << std::endl;
+    return false;
+  }
+  //cout << "loaded avisynth dll,.." << endl;
+  IScriptEnvironment* (*CreateScriptEnvironment)(int version) = (IScriptEnvironment*(*)(int)) avsDLL.resolve("CreateScriptEnvironment"); //resolve CreateScriptEnvironment from the dll
+  //cout << "loaded CreateScriptEnvironment definition from dll,.." << endl;
+  m_env = CreateScriptEnvironment(AVISYNTH_INTERFACE_VERSION); //create a new IScriptEnvironment
+  if (!m_env) { //abort if IScriptEnvironment couldn't be created
+    std::cerr << "Could not create IScriptenvironment,..." << std::endl;
+    return false;
+  }
+  return true;
+}
+
+bool avsViewer::setRessource()
 {
   try {
-    cout << "invokeImportInternal: " << inputFile << std::endl;
-    m_res = m_env->Invoke("Import", inputFile); //import current input to environment
-    std::cout << "invoke worked" << std::endl;
-    return 0;
-  } catch (AvisynthError &err) { //catch AvisynthErrors
-    cerr << "Avisynth error " << inputFile << ": " << endl << err.msg << endl;
-    return -1;
-  } catch (...) { //catch the rest
-    cerr << "Unknown C++ exception" << endl;
-    return -1;
-  }
-}
-
-int avsViewer::import(const char *inputFile)
-{
-  cout << "import: " << inputFile << std::endl;
-  __try  {
-    if (invokeImportInternal(inputFile) != 0) {
-      return -1;
+    AVS_linkage = m_env->GetAVSLinkage();
+    const char* infile = m_currentInput.toLocal8Bit(); //convert input name to char*
+    m_res = m_env->Invoke("Import", infile); //import current input to environment
+    if (!m_res.IsClip()) {
+       std::cerr << "Couldn't load input, not a clip!" << std::endl;
+       return false;
     }
-    return 0;
-  }
-  __except(1) {
-    cerr << "-> Win32 exception" << endl;
-    return -1;
-  }
-}
-
-int avsViewer::invokeInternal(const char *function)
-{
-  try {
-    cout << qPrintable(tr("invokeInternal: ")) << function << endl;
-    m_res = m_env->Invoke(function, AVSValue(&m_res, 1)); //import current input to environment
-    return 0;
-  } catch (AvisynthError &err) { //catch AvisynthErrors
-    cerr << qPrintable(tr("Avisynth error ")) << function << ": " << err.msg << endl;
-    return -1;
-  } catch (...) { //catch the rest
-    cerr << qPrintable(tr("Unknown C++ exception,..")) << endl;
-    return -1;
-  }
-}
-
-int avsViewer::invoke(const char *function)
-{
-  __try {
-    cout << "invoke: " << function << std::endl;
-    if (invokeInternal(function) != 0) {
-      return -1;
+    if (!m_res.Defined()) {
+      QString error = QObject::tr("Couldn't import:") + " " + m_currentInput;
+      error += "\r\n";
+      error += QObject::tr("Script seems not to be a valid avisynth script.");
+      cerr << qPrintable(error) << endl;
+      return false;
     }
-    return 0;
+    return true;
+  } catch (AvisynthError &err) { //catch AvisynthErrors
+    cerr << "-> " << err.msg << endl;
+  } catch (...) { //catch everything else
+    cerr << "-> Unknown error" << endl;
   }
-  __except(1) {
-    cerr << " -> Win32 exception" << endl;
-    return -1;
-  }
+  return false;
+}
 
+bool avsViewer::setVideoInfo()
+{
+  m_clip = m_res.AsClip();    //get clip
+  //cout << " grabbing clip infos,.." << endl;
+  m_inf = &(m_clip->GetVideoInfo());    //get clip infos
+  if (!m_inf->HasVideo()) { //abort if clip has no video
+    cerr << "Input has no video stream -> aborting" << endl;
+    return false;
+  }
+  return true;
 }
 
 void avsViewer::on_jumpBackwardPushButton_clicked()
@@ -247,7 +245,6 @@ void avsViewer::cleanUp()
   if (m_env != nullptr) {
     cout << "Clean up old script environment,.." << endl;
     m_res = 0;
-    m_clip = nullptr;
     m_env->DeleteScriptEnvironment(); //delete the old script environment
     m_env = nullptr; // ensure new environment created next time
     m_current = 0;
@@ -571,6 +568,7 @@ QString getCurrentInput(const QString& script)
 
 void avsViewer::changeTo(const QString& input, const QString& value)
 {
+  std::cout << "changeTo: " << qPrintable(input) << ", value: " << qPrintable(value) << std::endl;
   int currentPosition = 0;
   QString currentInput = getCurrentInput(m_currentContent); // the input of the avisynth script
   QFile file(value);
@@ -586,11 +584,6 @@ void avsViewer::changeTo(const QString& input, const QString& value)
   if (currentInput == newInput) { // input didn't change keeping position
     currentPosition = m_current;
   }
-  if (m_currentFrameWidth == 0) {
-    m_currentFrameWidth = m_inf.width;
-    m_currentFrameHeight = m_inf.height;
-  }
-
   this->killEnv(); // killing old Avisynth environment
   m_currentInput = value; //set current input
   m_showLabel->setText(tr("Preparing environment for %1").arg(m_currentInput));
@@ -599,7 +592,7 @@ void avsViewer::changeTo(const QString& input, const QString& value)
 
 void avsViewer::callMethod(const QString& typ, const QString& value, const QString &input)
 {
-  cout << "callmethod: " << qPrintable(typ) << ", value "<< qPrintable(value) << ", input " << qPrintable(input) << std::endl;
+  cout << "callmethod: " << qPrintable(typ) << ", value: "<< qPrintable(value) << ", input: " << qPrintable(input) << std::endl;
   if (!QFile::exists(value)){
     cout << qPrintable(QString("Change ignored since '%1' doesn't exist.").arg(value)) << std::endl;
     return;
@@ -613,27 +606,95 @@ void avsViewer::callMethod(const QString& typ, const QString& value, const QStri
   cerr << "     with value: " << qPrintable(value) << endl;
 }
 
+bool avsViewer::adjustScript(QString& input, bool& invokeFFInfo)
+{
+  QString newContent;
+  input = m_currentInput;
+  QFile file(input);
+  if (file.open(QIODevice::ReadOnly)) {
+    bool ffmpegSource = false;
+    bool showInfo = false;
+    bool mpeg2source = false;
+    bool dgnvsource = false;
+    QString content = file.readAll(), ffms2Line;
+    QStringList lines = content.split("\n");
+    QStringList nocomments;
+    foreach(QString line, lines) {
+      line = line.trimmed();
+      if (line.isEmpty() || line.startsWith('#')) {
+        continue;
+      }
+      nocomments << line;
+    }
+    content = lines.join("\n");
+    file.close();
+    m_currentContent = content;
+    m_dualView = content.contains("SourceFiltered = Source");
+    checkInputType(content, ffmpegSource, mpeg2source, dgnvsource, ffms2Line);
+    ui.infoCheckBox->setEnabled(true);
+    showInfo = ui.infoCheckBox->isChecked();
+    if (showInfo) {
+      int index = content.indexOf("distributor()", Qt::CaseInsensitive);
+      addShowInfoToContent(index, ffmpegSource, content, newContent, ffms2Line, invokeFFInfo, mpeg2source, dgnvsource);
+    }
+    if (ui.histogramCheckBox->isChecked()) {
+      addHistrogramToContent(content, newContent, m_matrix);
+    }
+    applyResolution(content, newContent, m_mult, ui.aspectRatioAdjustmentComboBox->currentText());
+  } else {
+    cerr << qPrintable(tr("Couldn't read content of: %1").arg(input)) << endl;
+    return false;
+  }
+  if (!newContent.isEmpty()) { //create new modfied avs file
+    QString directory = getDirectory(m_currentInput);
+    QString name = getFileName(m_currentInput);
+    m_avsModified = QDir::toNativeSeparators(directory + QDir::separator() + name + "_tmp.avs");
+    if (saveTextTo(newContent, m_avsModified) == 0) {
+      input = m_avsModified;
+    }
+  }
+  return true;
+}
+
+bool avsViewer::invokeFunction(const QString& name)
+{
+  try {
+    const char* function = name.toLocal8Bit();
+    m_res = m_env->Invoke(function, AVSValue(&m_res, 1)); //import current input to environment
+    std::cout << "invoked " << qPrintable(name) << std::endl;
+    return true;
+  } catch (AvisynthError &err) { //catch AvisynthErrors
+    cerr << "Avisynth error " << qPrintable(m_currentInput) << ": " << endl << err.msg << endl;
+  } catch (...) { //catch the rest
+    cerr << "Unknown C++ exception" << endl;
+  }
+  return false;
+}
+
+
+void avsViewer::initIPC()
+{
+  if (m_ipcID == QString()) {
+    return;
+  }
+  if (m_ipcServer == nullptr) {
+    cout << " starting ipc server, with serverName " << qPrintable(m_ipcID + "AVSVIEWER") << endl;
+    m_ipcServer = new LocalSocketIpcServer(m_ipcID + "AVSVIEWER", this);
+    connect(m_ipcServer, SIGNAL(messageReceived(QString)), this, SLOT(receivedMessage(QString)));
+  }
+  if (m_ipcClient == nullptr) {
+    cout << " starting ipc client with serverName " << qPrintable(m_ipcID + "HYBRID") << endl;
+    m_ipcClient = new LocalSocketIpcClient(m_ipcID + "HYBRID", this);
+  }
+}
+
 /**
  * initilazing an avisynth environment for the current input file
  **/
 int avsViewer::init(int start)
 {
-  if (start < 0) {
-    start = 0;
-  }
-  if (m_ipcID != QString()) {
-    if (m_ipcServer == nullptr) {
-      cout << " starting ipc server, with serverName " << qPrintable(m_ipcID + "AVSVIEWER") << endl;
-      m_ipcServer = new LocalSocketIpcServer(m_ipcID + "AVSVIEWER", this);
-      connect(m_ipcServer, SIGNAL(messageReceived(QString)), this, SLOT(receivedMessage(QString)));
-    }
-    if (m_ipcClient == nullptr) {
-      cout << " starting ipc client with serverName " << qPrintable(m_ipcID + "HYBRID") << endl;
-      m_ipcClient = new LocalSocketIpcClient(m_ipcID + "HYBRID", this);
-    }
-  }
+  this->initIPC();
   m_current = -1; //reset frameIndex
-  cout << qPrintable(tr("Initializing the avisynth script environment,..")) << endl;
   if (m_currentInput.isEmpty()) {
     cerr << qPrintable(tr("Current input is empty,..")) << endl;
     return -1;
@@ -644,166 +705,78 @@ int avsViewer::init(int start)
   }
   bool firstTime = this->minimumSize().width() == 0;
   cout << " first time: " << (firstTime ? "true" : "false") << std::endl;
-  bool scrolling = ui.scrollingCheckBox->isChecked();
-  bool changeLabelSize = false;
-  cout << " scrolling: " << (scrolling ? "true" : "false") << std::endl;
-  try { // load script
-    QLibrary avsDLL("avisynth.dll");
-    if (!avsDLL.isLoaded() && !avsDLL.load()) { //load avisynth.dll if it's not already loaded and abort if it couldn't be loaded
-      QString error = avsDLL.errorString();
-      if (!error.isEmpty()) {
-        cerr << qPrintable(tr("Could not load avisynth.dll!")) << qPrintable(error) << endl;
-        return -3;
-      }
-      cerr << qPrintable(tr("Could not load avisynth.dll!")) << endl;
-      return -4;
-    }
-    cout << qPrintable(" " + tr("Loaded avisynth dll,..")) << endl;
-    IScriptEnvironment* (*CreateScriptEnvironment)(int version) = (IScriptEnvironment*(*)(int)) avsDLL.resolve("CreateScriptEnvironment"); //resolve CreateScriptEnvironment from the dll
-    cout << qPrintable(" " + tr("Loaded CreateScriptEnvironment definition from dll,..")) << endl;
-    m_env = CreateScriptEnvironment(AVISYNTH_INTERFACE_VERSION); //create a new IScriptEnvironment
-    if (!m_env) { //abort if IScriptEnvironment couldn't be created
-      cerr << qPrintable(tr("Could not create IScriptenvironment,...")) << endl;
-      return -4;
-    }
-    cout << qPrintable(" " + tr("Created an IScriptEnvironment,..")) << endl;
-    try {
-      cout << qPrintable(" " + tr("Looking for avisynth version,..")) << endl;
-      AVSValue as_version;
-      as_version = m_env->Invoke("VersionString", AVSValue(&as_version, 0)); //get current version info
-      m_version = as_version.AsString(); //save current version for later use
-      cout << qPrintable("  " + tr("current avisynth version: %1").arg(m_version)) << endl;
-    } catch (...) {
-      cerr << qPrintable(tr("Could not get the current avisynth version,..")) << endl;
-      return -5;
-    }
-
-    if (scrolling) {
-      ui.scrollArea->setHorizontalScrollBarPolicy( Qt::ScrollBarAsNeeded );
-      ui.scrollArea->setVerticalScrollBarPolicy( Qt::ScrollBarAsNeeded );
-      ui.scrollArea->verticalScrollBar()->adjustSize();
-      ui.scrollArea->verticalScrollBar()->show();
-      ui.scrollArea->horizontalScrollBar()->adjustSize();
-      ui.scrollArea->horizontalScrollBar()->show();
-    } else {
-      ui.scrollArea->setHorizontalScrollBarPolicy( Qt::ScrollBarAlwaysOff );
-      ui.scrollArea->setVerticalScrollBarPolicy( Qt::ScrollBarAlwaysOff );
-      ui.scrollArea->verticalScrollBar()->resize(0, 0);
-      ui.scrollArea->verticalScrollBar()->hide();
-      ui.scrollArea->horizontalScrollBar()->resize(0, 0);
-      ui.scrollArea->horizontalScrollBar()->hide();
-    }
-    QString newContent, input = m_currentInput;
-    bool invokeFFInfo = false;
-    QFile file(input);
-    if (file.open(QIODevice::ReadOnly)) {
-      bool ffmpegSource = false;
-      bool showInfo = false;
-      bool mpeg2source = false;
-      bool dgnvsource = false;
-      QString content = file.readAll(), ffms2Line;
-      QStringList lines = content.split("\n");
-      QStringList nocomments;
-      foreach(QString line, lines) {
-        line = line.trimmed();
-        if (line.isEmpty() || line.startsWith('#')) {
-          continue;
-        }
-        nocomments << line;
-      }
-      content = lines.join("\n");
-      file.close();
-      m_currentContent = content;
-      m_dualView = content.contains("SourceFiltered = Source");
-
-      checkInputType(content, ffmpegSource, mpeg2source, dgnvsource, ffms2Line);
-      ui.infoCheckBox->setEnabled(true);
-      showInfo = ui.infoCheckBox->isChecked();
-      if (showInfo) {
-        int index = content.indexOf("distributor()", Qt::CaseInsensitive);
-        addShowInfoToContent(index, ffmpegSource, content, newContent, ffms2Line, invokeFFInfo, mpeg2source, dgnvsource);
-      }
-      if (ui.histogramCheckBox->isChecked()) {
-        addHistrogramToContent(content, newContent, m_matrix);
-      }
-      applyResolution(content, newContent, m_mult, ui.aspectRatioAdjustmentComboBox->currentText());
-    } else {
-      cerr << qPrintable(tr("Couldn't read content of: %1").arg(input)) << endl;
-      return -1;
-    }
-    if (!newContent.isEmpty()) { //create new modfied avs file
-      QString directory = getDirectory(m_currentInput);
-      QString name = getFileName(m_currentInput);
-      m_avsModified = QDir::toNativeSeparators(directory + QDir::separator() + name + "_tmp.avs");
-      if (saveTextTo(newContent, m_avsModified) == 0) {
-        input = m_avsModified;
-      }
-    }
-    cout << qPrintable(" " + tr("Importing: %1 into the environment,.. ").arg(input)) << endl;
-    const char* infile = input.toLocal8Bit(); //convert input name to char*
-    cout << "importing " << infile << std::endl;
-    int ret = import(infile);
-    if (ret != 0) {
-      cerr << qPrintable(tr("Couldn't import %2 (1): %1").arg(infile).arg(ret)) << endl;
-      return -6;
-    }
-    if (!m_res.Defined()) {
-      QString error = tr("Couldn't import (2):") + " " + input;
-      error += "\r\n";
-      error += tr("Script seems not to be a valid avisynth script.");
-      cerr << qPrintable(error) << endl;
-      return -7;
-    }
-    cout << qPrintable(" " + tr("Script seems to be a valid avisynth script.")) << endl;
-    cout << qPrintable(" " + tr("Initializating a clip,..")) << endl;
-    m_clip = m_res.AsClip(); //get clip
-    cout << qPrintable(" " + tr("Grabbing clip infos,..")) << endl;
-    m_inf = m_clip->GetVideoInfo(); //get clip infos
-
-    if (!m_inf.HasVideo()) { //abort if clip has no video
-      cerr << qPrintable(tr("Input has no video stream -> aborting")) << endl;
-      return -8;
-    }
-    bool reload = false;
-    this->outputColorSpaceInfo();
-    if (!m_inf.IsRGB32()) { // make sure color is RGB32
-      if (this->invoke("ConvertToRGB32") != 0) {
-        cerr << qPrintable(tr("Couldn't invoke 'ConvertToTGB()' -> aborting")) << endl;
-        this->killEnv();
-        return -9;
-      }
-      reload = true;
-    }
-    if (invokeFFInfo) {
-      if (this->invoke("FFInfo") != 0) {
-        cerr << qPrintable(tr("Couldn't invoke 'FFInfo()' -> aborting")) << endl;
-        this->killEnv();
-        return -10;
-      }
-      reload = true;
-    }
-    if (reload) {
-      cout << qPrintable(" " + tr("initializating the clip anew,..")) << endl;
-      m_clip = m_res.AsClip(); // update clip
-      cout << qPrintable(" " + tr("Grabbing clip infos,..")) << endl;
-      m_inf = m_clip->GetVideoInfo(); // update clip info
-    }
-    int width = 0, height = 0;
-    this->adjustToVideoInfo(scrolling, firstTime, width, height, changeLabelSize);
-    cout << qPrintable(" " + tr("Adjusting slider to frame count,..")) << endl;
-    ui.frameHorizontalSlider->setMaximum(m_frameCount -1);
-    ui.jumpToSpinBox->setMaximum(m_frameCount -1);
-    ui.frameHorizontalSlider->resetMarks();
-    this->adjustLabelSize(changeLabelSize && (firstTime || ui.histogramCheckBox->isChecked() || !scrolling), width, height); // adjust label size
-    this->showFrame(start); //show frame
-    this->adjustWindowSize(changeLabelSize, width, height);
-  } catch (AvisynthError &err) { //catch AvisynthErrors
-    cerr << qPrintable(tr("-> Avisynth error: %1").arg(err.msg)) << endl;
-    return -11;
-  } catch (...) { //catch everything else
-    cerr << qPrintable("->" + tr("Unknown error")) << endl;
-    return -12;
+  cout << qPrintable(tr("Initializing the avisynth script environment,..")) << endl;
+  if (!this->initEnv()) {
+    return -3;
   }
+  QString input;
+  bool invokeFFInfo = false;
+  if (!this->adjustScript(input, invokeFFInfo)){
+    return -4;
+  }
+  AVS_linkage = m_env->GetAVSLinkage();
+  if (!setRessource()) {
+    return -5;
+  }
+  if (!this->setVideoInfo()) {
+    return -6;
+  }
+  this->showVideoInfo();
+  bool scrolling = ui.scrollingCheckBox->isChecked();
+  cout << " scrolling: " << (scrolling ? "true" : "false") << std::endl;
+  if (scrolling) {
+    ui.scrollArea->setHorizontalScrollBarPolicy( Qt::ScrollBarAsNeeded );
+    ui.scrollArea->setVerticalScrollBarPolicy( Qt::ScrollBarAsNeeded );
+    ui.scrollArea->verticalScrollBar()->adjustSize();
+    ui.scrollArea->verticalScrollBar()->show();
+    ui.scrollArea->horizontalScrollBar()->adjustSize();
+    ui.scrollArea->horizontalScrollBar()->show();
+  } else {
+    ui.scrollArea->setHorizontalScrollBarPolicy( Qt::ScrollBarAlwaysOff );
+    ui.scrollArea->setVerticalScrollBarPolicy( Qt::ScrollBarAlwaysOff );
+    ui.scrollArea->verticalScrollBar()->resize(0, 0);
+    ui.scrollArea->verticalScrollBar()->hide();
+    ui.scrollArea->horizontalScrollBar()->resize(0, 0);
+    ui.scrollArea->horizontalScrollBar()->hide();
+  }
+  bool reload = false;
+  std::cout << "Current color space: " << qPrintable(this->getColor()) << std::endl;
+  if (!m_inf->IsRGB32()) { // make sure color is RGB32
+    if (!this->invokeFunction("ConvertToRGB32")) {
+      cerr << qPrintable(tr("Couldn't invoke 'ConvertToTGB()' -> aborting")) << endl;
+      this->killEnv();
+      return -9;
+    }
+    reload = true;
+  }
+  if (invokeFFInfo) {
+    if (!this->invokeFunction("FFInfo")) {
+      cerr << qPrintable(tr("Couldn't invoke 'FFInfo()' -> aborting")) << endl;
+      this->killEnv();
+      return -10;
+    }
+    reload = true;
+  }
+  if (reload) {
+    cout << qPrintable(" " + tr("initializating the clip anew,..")) << endl;
+    if (!this->setVideoInfo()) { //abort if clip has no video
+      cerr << qPrintable(tr("Input has no video stream -> aborting")) << endl;
+      return -11;
+    }
+  }
+  bool changeLabelSize = false;
+  int width = 0, height = 0;
+  this->adjustToVideoInfo(scrolling, firstTime, width, height, changeLabelSize);
+  cout << qPrintable(" " + tr("Adjusting slider to frame count,..")) << endl;
+  ui.frameHorizontalSlider->setMaximum(m_frameCount -1);
+  ui.jumpToSpinBox->setMaximum(m_frameCount -1);
+  ui.frameHorizontalSlider->resetMarks();
+  this->adjustLabelSize(changeLabelSize && (firstTime || ui.histogramCheckBox->isChecked() || !scrolling), width, height); // adjust label size
+  if (start < 0) {
+    start = 0;
+  }
+  this->showFrame(start); //show frame
+  this->adjustWindowSize(changeLabelSize, width, height);
   cout << qPrintable(tr("finished initializing the avisynth script environment,..")) << endl;
   if (m_ipcClient != nullptr) {
     m_ipcClient->send_MessageToServer("AvsViewer started ipcClient&Server with id " + m_ipcID);
@@ -817,32 +790,83 @@ int avsViewer::init(int start)
   return 0;
 }
 
-void avsViewer::outputColorSpaceInfo() const
+/**
+ * output the current color space
+ *
+ * @return String representtion of the current color
+ */
+QString avsViewer::getColor() const
 {
-  cout << qPrintable(" " + tr("Checking colorspace,..")) << endl;
-  if (m_inf.IsRGB32()) {
-    cout << qPrintable("  " + tr("current color space is RGB32")) << endl;
-  } else if (m_inf.IsRGB()) {
-    cout << qPrintable("  " + tr("current color space is RGB")) << endl;
-  } else if (m_inf.IsYV12()) {
-    cout << qPrintable("  " + tr("current color space is Yv12")) << endl;
-  } else if (m_inf.IsRGB24()) {
-    cout << qPrintable("  " + tr("current color space is RGB24")) << endl;
-  } else if (m_inf.IsYUY2()) {
-    cout << qPrintable("  " + tr("current color space is YUY2")) << endl;
-  } else if (m_inf.IsYUV()) {
-    cout << qPrintable("  " + tr("current color space is YUV")) << endl;
-  } else {
-    cout << qPrintable("  " + tr("current color space is unknown")) << endl;
+  if (m_inf->IsY8()) {
+    return QString("Y8");
   }
+  if (m_inf->Is420()) {
+    return QString("YV12");
+  }
+  if (m_inf->IsYUY2()) {
+    return QString("YUY2");
+  }
+  if (m_inf->IsYV16()) {
+    return QString("YV16");
+  }
+  if (m_inf->IsYV24()) {
+    return QString("YV24");
+  }
+  if (m_inf->IsRGB24()) {
+    return QString("RGB24");
+  }
+  if (m_inf->IsRGB32()) {
+    return QString("RGB32");
+  }
+  if (m_inf->IsRGB48()) {
+    return QString("RGB48");
+  }
+  if (m_inf->IsRGB()) {
+    return QString("RGB");
+  }
+  if (m_inf->IsYUV()) {
+    return QString("YUV");
+  }
+  return QString("unknown");
+}
+
+/**
+ * Show the characteristics of the video
+ */
+void avsViewer::showVideoInfo()
+{
+  std::cout << "Color: " << qPrintable(this->getColor());
+  std::cout << ", Resolution: " << m_inf->width << "x" << m_inf->height;
+  if (m_inf->fps_denominator == 1) {
+     std::cout << ", Frame rate: " << m_inf->fps_numerator << " fps";
+  } else {
+    std::cout << ", Frame rate: " << m_inf->fps_numerator << "/" << m_inf->fps_denominator << " fps";
+  }
+  m_frameCount = m_inf->num_frames;
+  std::cout << ", Length: " << m_frameCount << " frames";
+  if (m_inf->IsBFF()) {
+    std::cout << ", BFF" << std::endl;
+  } else if (m_inf->IsTFF()) {
+    std::cout << ", TFF" << std::endl;
+  } else {
+    std::cout << ", PRO" << std::endl;
+  }
+  if (m_inf->HasAudio()) {
+    int sampleRate = m_inf->audio_samples_per_second;
+    if (sampleRate != 0) {
+      std::cout << "Audio:" << std::endl;
+      std::cout << "Sample rate: " << sampleRate << " Hz";
+      std::cout << ", Channel count: " << m_inf->nchannels << std::endl;
+    }
+  }
+  std::cout << std::endl;
 }
 
 void avsViewer::adjustToVideoInfo(const bool& scrolling, const bool& first, int& width, int& height, bool& changeLabelSize)
 {
-  m_frameCount = m_inf.num_frames; //get frame count
-  cout << qPrintable(" -> " + tr("Clip contains: %1 frames").arg(m_frameCount)) << endl;
-  width = m_inf.width;
-  height = m_inf.height;
+  this->showVideoInfo();
+  width = m_inf->width;
+  height = m_inf->height;
   if (m_currentFrameWidth != 0) {
     width = m_currentFrameWidth;
     height = m_currentFrameHeight;
@@ -917,10 +941,12 @@ void avsViewer::addBordersForFill(int& width)
   int add = 16-m_fill;
   try {
     AVSValue args[5] = {m_clip, 0, 0, add, 0};
-    m_clip = m_env->Invoke("AddBorders", AVSValue(args, 5)).AsClip();
-    m_inf = m_clip->GetVideoInfo();
+    m_res = m_env->Invoke("AddBorders", AVSValue(args, 5)).AsClip();
+    if (!this->setVideoInfo()) {
+      return;
+    }
     width += add;
-    cout << " adding borders -> new clip resolution: " << m_inf.width << "x" << m_inf.height << endl;
+    cout << " adding borders -> new clip resolution: " << m_inf->width << "x" << m_inf->height << endl;
     m_noAddBorders = true;
   } catch (AvisynthError &err) { //catch AvisynthErrors
     cerr << qPrintable(tr("Avisynth error: ")) << err.msg << endl;
@@ -952,8 +978,8 @@ void avsViewer::showFrame(const int& i)
   cout << "  m_frameCount: " << m_frameCount << endl;
   cout << "  m_env: " << int(m_env != nullptr) << endl;
   try {
-    int width = m_inf.width;
-    int height = m_inf.height;
+    int width = m_inf->width;
+    int height = m_inf->height;
     cout << "avisynth frame resolution: " << width << "x" << height << endl;
     cout << "current label resolution: " << m_currentFrameWidth << "x" << m_currentFrameHeight << endl;
     if (m_fill == 0) {

@@ -74,8 +74,8 @@ void LocalSocketIpcServer::socket_readReady()
   }
 #ifdef QT_DEBUG
   std::cout << "[avsViewer Server]:  socket is ready to be read" << std::endl;
-  std::cout << "[avsViewer Server]: connection open:"  << (m_clientConnection->isOpen() ? "true" : "false"))  << std::endl;
-  std::cout << "[avsViewer Server]: connection readable", (m_clientConnection->isReadable() ? "true" : "false"))  << std::endl;
+  std::cout << "[avsViewer Server]: connection open:"  << (m_clientConnection->isOpen() ? "true" : "false")  << std::endl;
+  std::cout << "[avsViewer Server]: connection readable", (m_clientConnection->isReadable() ? "true" : "false")  << std::endl;
 #endif
   QDataStream in(m_clientConnection);
   in.setVersion(QDataStream::Qt_5_5);
@@ -95,5 +95,3 @@ void LocalSocketIpcServer::socket_readReady()
 #endif
   }
 }
-
-

@@ -3,7 +3,6 @@
 
 #include "ui_viewer.h"
 #include "avisynth.h"
-
 #include <QObject>
 #include <QImage>
 #include <QWidget>
@@ -12,7 +11,6 @@
 #include <QLabel>
 #include <QFile>
 
-class IScriptEnvironment;
 class LocalSocketIpcServer;
 class LocalSocketIpcClient;
 class QResizeEvent;
@@ -26,12 +24,10 @@ class avsViewer : public QWidget
 
   private:
     Ui::avsViewerClass ui;
-    IScriptEnvironment* m_env;
-    VideoInfo m_inf;
-    PClip m_clip;
     int m_frameCount, m_current;
     QString m_currentInput, m_version, m_avsModified, m_inputPath;
     AVSValue m_res;
+    PClip  m_clip;
     double m_mult;
     QImage m_currentImage;
     bool m_dualView;
@@ -46,12 +42,16 @@ class avsViewer : public QWidget
     int m_currentFrameHeight;
     int m_fill;
     bool m_noAddBorders;
+    IScriptEnvironment* m_env;
     void showFrame(const int &frame);
     int init(int start = 0);
-    int import(const char *inputFile);
-    int invoke(const char *function);
-    int invokeInternal(const char *function);
-    int invokeImportInternal(const char *inputFile);
+    bool initEnv();
+    const VideoInfo* m_inf;
+    bool setRessource();
+    bool setVideoInfo();
+    bool invokeFunction(const QString& name);
+    QString getColor() const;
+    bool adjustScript(QString &input, bool &invokeFFInfo);
     void killEnv();
     QString fillUp(int number);
     void callMethod(const QString& typ, const QString& value, const QString &input);
@@ -63,8 +63,8 @@ class avsViewer : public QWidget
     void adjustWindowSize(const bool& adjust, const int& width, const int& height);
     void adjustLabelSize(const bool& adjust, const int& width, const int& height);
     void adjustToVideoInfo(const bool& scrolling, const bool& first, int& width, int& height, bool &changeLabelSize);
-    void outputColorSpaceInfo() const;
-
+    void showVideoInfo();
+    void initIPC();
   private slots:
     void on_frameHorizontalSlider_valueChanged(int value);
     void on_nextPushButton_clicked();
