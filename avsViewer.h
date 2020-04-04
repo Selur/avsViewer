@@ -68,6 +68,9 @@ class avsViewer : public QWidget
     void initIPC();
     void sendMessageToSever(const QString& message);
     QString getCurrentInput(const QString& script);
+    unsigned char *getFrameData(const int &i, const int &count);
+    void outputResType();
+
   private slots:
     void on_frameHorizontalSlider_valueChanged(int value);
     void on_nextPushButton_clicked();

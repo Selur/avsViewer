@@ -129,7 +129,7 @@ bool avsViewer::setRessource()
   } catch (AvisynthError &err) { //catch AvisynthErrors
     std::cerr << "-> " << err.msg << std::endl;
   } catch (...) { //catch everything else
-    std::cerr << "-> Unknown error" << std::endl;
+    std::cerr << "-> setRessource: Unknown error" << std::endl;
   }
   return false;
 }
@@ -248,7 +248,7 @@ void avsViewer::cleanUp()
     } catch (AvisynthError &err) { //catch AvisynthErrors
       std::cerr << "Failed to delete script environment " << err.msg << std::endl;
     } catch (...) {
-      std::cerr << "Failed to delete script environment,.." << std::endl;
+      std::cerr << "Failed to delete script environment,.. (Unkown Error)" << std::endl;
     }
     m_env = nullptr; // ensure new environment created next time
     m_current = 0;
@@ -973,6 +973,43 @@ void avsViewer::cropForFill(QImage& image, int& width, const int& height)
   sendMessageToSever(QString(" cropped -> new image resolution: %1x%2").arg(image.width()).arg(image.height()));
 }
 
+void avsViewer::outputResType()
+{
+ if (m_res.IsBool()) {
+   std::cerr << "Res is bool" << std::endl;
+ }
+ if (m_res.IsClip()) {
+   std::cerr << "Res is clip" << std::endl;
+ }
+ if (m_res.IsArray()) {
+   std::cerr << "Res is array" << std::endl;
+ }
+ if (m_res.IsFloat()) {
+   std::cerr << "Res is float" << std::endl;
+ }
+ if (m_res.IsString()) {
+   std::cerr << "Res is string" << std::endl;
+ }
+}
+
+unsigned char* avsViewer::getFrameData(const int& i, const int& count)
+{
+  try {
+    PClip clip = m_res.AsClip();    //get clip
+    PVideoFrame pvframe = clip->GetFrame(i, m_env); // get frame number i
+    if (pvframe == nullptr) {
+      std::cerr << " couldn't show frame (no frame: " << i << ")" << std::endl;
+      return nullptr;
+    }
+    return const_cast<unsigned char*>(pvframe->GetReadPtr());
+  } catch (AvisynthError &err) { //catch AvisynthErrors
+    std::cerr << "-> " << err.msg << std::endl;
+  } catch (...) { //catch everything else
+    std::cout << "-> getFrameData - Unknown error (" << count << ")" << std::endl;
+  }
+  return nullptr;
+}
+
 /**
  * shows frame number i
  **/
@@ -988,13 +1025,16 @@ void avsViewer::showFrame(const int& i)
       m_fill = width%16;
     }
     this->addBordersForFill(width);
-    PVideoFrame f = m_res.AsClip()->GetFrame(i, m_env); // get frame number i
-    if (f == nullptr) {
-      std::cerr << " couldn't show frame (no frame: " << i << ")" << std::endl;
+    int count = 0;
+    unsigned char* data = this->getFrameData(i, count);
+    while (data == nullptr && count < 10) {
+      data = this->getFrameData(i, count);
+      count++;
+    }
+    if (data == nullptr) {
+      std::cerr << " could not get PVideoFrame data (" << i << ")" << std::endl;
       return;
     }
-
-    const unsigned char* data = f->GetReadPtr();
     QImage image(data, width, height, QImage::Format_RGB32); //create a QImage
     this->cropForFill(image, width, height);
     m_showLabel->setText(QString());
@@ -1016,10 +1056,11 @@ void avsViewer::showFrame(const int& i)
     m_currentFrameHeight = m_showLabel->height();
     m_current = i; //set m_current to i
     ui.frameHorizontalSlider->setSliderPosition(m_current); // adjust the slider position
-
     QString title = tr("showing frame number: %1 of %2").arg(m_current).arg(m_frameCount); //adjust title bar;
     if (m_dualView) {
-      if (m_currentScriptContent.contains(QString("Source, SourceFiltered"))) {
+      if (m_currentScriptContent.contains(QString("Interleave(Source, SourceFiltered)"))) {
+        title += " " + tr("(interleaved, input: %1)").arg(m_currentInput);
+      } else if (m_currentScriptContent.contains(QString("Source, SourceFiltered"))) {
         title += " " + tr("(left side = original, right side = filtered; input: %1)").arg(m_currentInput);
       } else if (m_currentScriptContent.contains(QString("SourceFiltered, Source"))) {
         title += " " + tr("(left side = filtered, right side = original; input: %1)").arg(m_currentInput);
