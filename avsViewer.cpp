@@ -29,7 +29,8 @@ avsViewer::avsViewer(QWidget *parent, const QString& path, const double& mult, c
         m_dualView(false), m_desktopWidth(1920), m_desktopHeight(1080),
         m_ipcID(ipcID), m_currentContent(QString()), m_ipcServer(nullptr), m_ipcClient(nullptr),
         m_matrix(matrix), m_showLabel(new QLabel()), m_zoom(1),
-        m_currentFrameWidth(0), m_currentFrameHeight(0), m_fill(0), m_noAddBorders(false), m_env(nullptr)
+        m_currentFrameWidth(0), m_currentFrameHeight(0), m_fill(0), m_noAddBorders(false), m_env(nullptr),
+        m_inf(nullptr), m_currentScriptContent()
 {
   ui.setupUi(this);
   QString stylepath = QApplication::applicationDirPath()+"/avsViewer.style";
@@ -135,9 +136,8 @@ bool avsViewer::setRessource()
 
 bool avsViewer::setVideoInfo()
 {
-  m_clip = m_res.AsClip();    //get clip
-  //cout << " grabbing clip infos,.." << endl;
-  m_inf = &(m_clip->GetVideoInfo());    //get clip infos
+  PClip  clip = m_res.AsClip();    //get clip
+  m_inf = &(clip->GetVideoInfo());    //get clip infos
   if (!m_inf->HasVideo()) { //abort if clip has no video
     std::cerr << "Input has no video stream -> aborting" << std::endl;
     return false;
@@ -245,6 +245,8 @@ void avsViewer::cleanUp()
     m_res = 0;
     try {
       m_env->DeleteScriptEnvironment(); //delete the old script environment
+    } catch (AvisynthError &err) { //catch AvisynthErrors
+      std::cerr << "Failed to delete script environment " << err.msg << std::endl;
     } catch (...) {
       std::cerr << "Failed to delete script environment,.." << std::endl;
     }
@@ -353,18 +355,23 @@ int saveTextTo(const QString& text, const QString& to)
 
 void checkInputType(const QString& content, bool &ffmpegSource, bool &mpeg2source, bool &dgnvsource, QString &ffms2Line)
 {
-  bool ffms2Avs = false;
   foreach(QString line, content.split("\n"))
   {
-    if (line.contains("FFMpegSource2(", Qt::CaseInsensitive)
-        || line.contains("FFVideoSource(", Qt::CaseInsensitive)) {
-      ffmpegSource = true;
-    }
     if (line.contains("MPEG2Source(", Qt::CaseInsensitive)) {
       mpeg2source = true;
+      return;
     }
     if (line.contains("DGSource(", Qt::CaseInsensitive)) {
       dgnvsource = true;
+      return;
+    }
+    if (line.contains("FFMpegSource2(", Qt::CaseInsensitive)
+        || line.contains("FFVideoSource(", Qt::CaseInsensitive)) {
+      ffmpegSource = true;
+      continue;
+    }
+    if (ffmpegSource && !ffms2Line.isEmpty()) {
+      return;
     }
     if (line.contains("ffms2.dll", Qt::CaseInsensitive)) {
       ffms2Line = line;
@@ -374,9 +381,6 @@ void checkInputType(const QString& content, bool &ffmpegSource, bool &mpeg2sourc
       ffms2Line += QDir::separator();
       ffms2Line += "FFMS2.avsi";
       ffms2Line = QDir::toNativeSeparators(ffms2Line);
-    }
-    if (line.contains("FFMS2.avs", Qt::CaseInsensitive)) {
-      ffms2Avs = true;
     }
   }
 }
@@ -581,9 +585,7 @@ void avsViewer::changeTo(const QString& input, const QString& value)
   if (currentInput == newInput) { // input didn't change keeping position
     currentPosition = m_current;
   }
-  qApp->processEvents();
   this->killEnv(); // killing old Avisynth environment
-  qApp->processEvents();
   m_currentInput = value; //set current input
   m_showLabel->setText(tr("Preparing environment for %1").arg(m_currentInput));
   this->init(currentPosition);
@@ -625,6 +627,7 @@ bool avsViewer::adjustScript(QString& input, bool& invokeFFInfo)
       nocomments << line;
     }
     content = lines.join("\n");
+    m_currentScriptContent = content;
     file.close();
     m_currentContent = content;
     m_dualView = content.contains("SourceFiltered = Source");
@@ -650,6 +653,7 @@ bool avsViewer::adjustScript(QString& input, bool& invokeFFInfo)
     if (saveTextTo(newContent, m_avsModified) == 0) {
       input = m_avsModified;
     }
+    m_currentScriptContent = newContent;
   }
   return true;
 }
@@ -662,7 +666,7 @@ bool avsViewer::invokeFunction(const QString& name)
     std::cout << "invoked " << qPrintable(name) << std::endl;
     return true;
   } catch (AvisynthError &err) { //catch AvisynthErrors
-    std::cerr << "Avisynth error " << qPrintable(m_currentInput) << ": " << endl << err.msg << std::endl;
+    std::cerr << "Avisynth error " << qPrintable(m_currentInput) << ": " << std::endl << err.msg << std::endl;
   } catch (...) { //catch the rest
     std::cerr << "Unknown C++ exception" << std::endl;
   }
@@ -724,7 +728,6 @@ int avsViewer::init(int start)
   if (!this->adjustScript(input, invokeFFInfo)){
     return -4;
   }
-  AVS_linkage = m_env->GetAVSLinkage();
   if (!setRessource()) {
     return -5;
   }
@@ -946,7 +949,7 @@ void avsViewer::addBordersForFill(int& width)
   }
   int add = 16-m_fill;
   try {
-    AVSValue args[5] = {m_clip, 0, 0, add, 0};
+    AVSValue args[5] = {m_res.AsClip(), 0, 0, add, 0};
     m_res = m_env->Invoke("AddBorders", AVSValue(args, 5)).AsClip();
     if (!this->setVideoInfo()) {
       return;
@@ -985,7 +988,7 @@ void avsViewer::showFrame(const int& i)
       m_fill = width%16;
     }
     this->addBordersForFill(width);
-    PVideoFrame f = m_clip->GetFrame(i, m_env); // get frame number i
+    PVideoFrame f = m_res.AsClip()->GetFrame(i, m_env); // get frame number i
     if (f == nullptr) {
       std::cerr << " couldn't show frame (no frame: " << i << ")" << std::endl;
       return;
@@ -1013,9 +1016,16 @@ void avsViewer::showFrame(const int& i)
     m_currentFrameHeight = m_showLabel->height();
     m_current = i; //set m_current to i
     ui.frameHorizontalSlider->setSliderPosition(m_current); // adjust the slider position
+
     QString title = tr("showing frame number: %1 of %2").arg(m_current).arg(m_frameCount); //adjust title bar;
     if (m_dualView) {
-      title += " " + tr("(left side = original, right side = filtered; input: %1)").arg(m_currentInput);
+      if (m_currentScriptContent.contains(QString("Source, SourceFiltered"))) {
+        title += " " + tr("(left side = original, right side = filtered; input: %1)").arg(m_currentInput);
+      } else if (m_currentScriptContent.contains(QString("SourceFiltered, Source"))) {
+        title += " " + tr("(left side = filtered, right side = original; input: %1)").arg(m_currentInput);
+      } else {
+        title += " " + tr("(input: %1)").arg(m_currentInput);
+      }
     }
     this->setWindowTitle(title);
   } catch (...) {
@@ -1025,6 +1035,7 @@ void avsViewer::showFrame(const int& i)
 
 void avsViewer::killEnv()
 {
+   qApp->processEvents();
   sendMessageToSever(QString("KILL environment"));
   this->cleanUp();
   if (!m_avsModified.isEmpty()) {
@@ -1052,9 +1063,9 @@ void avsViewer::on_jumpToEndPushButton_clicked()
 
 void avsViewer::on_jumpToPushButton_clicked()
 {
-          if (m_frameCount == 0) {
-            return;
-          }
+  if (m_frameCount == 0) {
+    return;
+  }
   int to = ui.jumpToSpinBox->value();
   this->showFrame(to);
 }
@@ -1070,7 +1081,7 @@ void avsViewer::on_openAvsPushButton_clicked()
   QString inputPath = QApplication::applicationDirPath();
   QString input = QFileDialog::getOpenFileName(this, name, inputPath, select);
   if (!input.endsWith(".avs") || input.isEmpty()) { //abort if input does not end with .avs
-    //std::cout << "Current input is empty or not an .avs file,.." << std::endl;
+    std::cerr << "Current input is empty or not an .avs file,.." << std::endl;
     return;
   }
   this->killEnv();
@@ -1080,6 +1091,9 @@ void avsViewer::on_openAvsPushButton_clicked()
   this->init();
 }
 
+/**
+ * refresh frame on resize event
+ */
 void avsViewer::resizeEvent(QResizeEvent* event)
 {
    QWidget::resizeEvent(event);

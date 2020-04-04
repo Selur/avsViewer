@@ -27,7 +27,6 @@ class avsViewer : public QWidget
     int m_frameCount, m_current;
     QString m_currentInput, m_version, m_avsModified, m_inputPath;
     AVSValue m_res;
-    PClip  m_clip;
     double m_mult;
     QImage m_currentImage;
     bool m_dualView;
@@ -43,10 +42,12 @@ class avsViewer : public QWidget
     int m_fill;
     bool m_noAddBorders;
     IScriptEnvironment* m_env;
+    const VideoInfo* m_inf;
+    QString m_currentScriptContent;
     void showFrame(const int &frame);
     int init(int start = 0);
     bool initEnv();
-    const VideoInfo* m_inf;
+
     bool setRessource();
     bool setVideoInfo();
     bool invokeFunction(const QString& name);

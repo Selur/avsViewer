@@ -9,7 +9,7 @@
 #include <iostream>
 #include <QDataStream>
 
-LocalSocketIpcClient::LocalSocketIpcClient(QString remoteServername, QObject *parent)
+LocalSocketIpcClient::LocalSocketIpcClient(const QString& remoteServername, QObject *parent)
     : QObject(parent), m_blockSize(0)
 {
   m_socket = new QLocalSocket(this);
@@ -51,15 +51,15 @@ void LocalSocketIpcClient::socket_connected()
 
 void LocalSocketIpcClient::socket_disconnected()
 {
-  std::cout << "avisynth viewer: socket_disconnected" << endl;
+  std::cout << "avisynth viewer: socket_disconnected" << std::endl;
 }
 
 void LocalSocketIpcClient::socket_readReady()
 {
-  std::cout << "avisynth viewer: socket_readReady" << endl;
+  std::cout << "avisynth viewer: socket_readReady" << std::endl;
 }
 
 void LocalSocketIpcClient::socket_error(QLocalSocket::LocalSocketError)
 {
-  std::cout << "avisynth viewer: socket_error" << endl;
+  std::cout << "avisynth viewer: socket_error" << std::endl;
 }

@@ -10,14 +10,12 @@
 #include <iostream>
 #include <QDataStream>
 
-LocalSocketIpcServer::LocalSocketIpcServer(QString servername, QObject *parent)
+LocalSocketIpcServer::LocalSocketIpcServer(const QString& servername, QObject *parent)
     : QObject(parent), m_serverName(servername), m_clientConnection(nullptr)
 {
   m_server = new QLocalServer(this);
-  bool started = false;
   for (int i = 0; i < 10; ++i) {
-    started = m_server->listen(m_serverName);
-    if (started) {
+    if (m_server->listen(m_serverName)) {
       connect(m_server, SIGNAL(newConnection()), this, SLOT(socket_new_connection()));
       break;
     }
@@ -75,7 +73,7 @@ void LocalSocketIpcServer::socket_readReady()
 #ifdef QT_DEBUG
   std::cout << "[avsViewer Server]:  socket is ready to be read" << std::endl;
   std::cout << "[avsViewer Server]: connection open:"  << (m_clientConnection->isOpen() ? "true" : "false")  << std::endl;
-  std::cout << "[avsViewer Server]: connection readable", (m_clientConnection->isReadable() ? "true" : "false")  << std::endl;
+  std::cout << "[avsViewer Server]: connection readable" << (m_clientConnection->isReadable() ? "true" : "false")  << std::endl;
 #endif
   QDataStream in(m_clientConnection);
   in.setVersion(QDataStream::Qt_5_5);
