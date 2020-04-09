@@ -52,7 +52,7 @@ class avsViewer : public QWidget
     bool setVideoInfo();
     bool invokeFunction(const QString& name);
     QString getColor() const;
-    bool adjustScript(QString &input, bool &invokeFFInfo);
+    bool adjustScript(bool &invokeFFInfo);
     void killEnv();
     QString fillUp(int number);
     void callMethod(const QString& typ, const QString& value, const QString &input);
@@ -70,6 +70,7 @@ class avsViewer : public QWidget
     QString getCurrentInput(const QString& script);
     unsigned char *getFrameData(const int &i, const int &count);
     void outputResType();
+    void applyResolution(const QString& content, QString &newContent, double mult, const QString& resize);
 
   private slots:
     void on_frameHorizontalSlider_valueChanged(int value);

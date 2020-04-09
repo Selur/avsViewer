@@ -111,8 +111,10 @@ bool avsViewer::initEnv()
 bool avsViewer::setRessource()
 {
   try {
+
     AVS_linkage = m_env->GetAVSLinkage();
     const char* infile = m_currentInput.toLocal8Bit(); //convert input name to char*
+    std::cout << "Importing " << infile << std::endl;
     m_res = m_env->Invoke("Import", infile); //import current input to environment
     if (!m_res.IsClip()) {
        std::cerr << "Couldn't load input, not a clip!" << std::endl;
@@ -498,7 +500,7 @@ void addHistrogramToContent(const QString& content, QString &newContent, const Q
   }
 }
 
-void applyResolution(const QString& content, QString &newContent, double mult, const QString& resize)
+void avsViewer::applyResolution(const QString& content, QString &newContent, double mult, const QString& resize)
 {
   if (resize == QString("None")) {
     return;
@@ -511,7 +513,20 @@ void applyResolution(const QString& content, QString &newContent, double mult, c
   }
   newContent = newContent.trimmed();
   QString resizer;
-  resizer = resize + "Resize(Ceil(last.Width*" + QString::number(mult) + "), last.Height)\n";
+  if (m_inf->IsFieldBased() && !m_inf->IsRGB()) {
+    resizer = resize + "Resize(Ceil(last.Width*" + QString::number(mult) + "), last.Height)\n";
+    /*
+    Separatefields()
+    Shift=(Height()/Float(new_height/2)-1.0)*0.25 # Field shift correction
+    even=SelectEven().Spline36Resize(new_width, new_height/2, 0, -Shift, Width(), Height())
+    odd=SelectOdd().Spline36Resize(new_width, new_height/2, 0, Shift, Width(), Height())
+    Interleave(even,odd)
+    Assumefieldbased().AssumeTFF().Weave()
+    */
+  } else {
+    resizer = resize + "Resize(Ceil(last.Width*" + QString::number(mult) + "), last.Height)\n";
+  }
+
   int index = newContent.indexOf("distributor()", Qt::CaseInsensitive);
   if (index != -1) { // add before distributor
     newContent.insert(index, resizer);
@@ -606,11 +621,10 @@ void avsViewer::callMethod(const QString& typ, const QString& value, const QStri
   std::cerr << "     with value: " << qPrintable(value) << std::endl;
 }
 
-bool avsViewer::adjustScript(QString& input, bool& invokeFFInfo)
+bool avsViewer::adjustScript(bool& invokeFFInfo)
 {
   QString newContent;
-  input = m_currentInput;
-  QFile file(input);
+  QFile file(m_currentInput);
   if (file.open(QIODevice::ReadOnly)) {
     bool ffmpegSource = false;
     bool showInfo = false;
@@ -643,7 +657,7 @@ bool avsViewer::adjustScript(QString& input, bool& invokeFFInfo)
     }
     applyResolution(content, newContent, m_mult, ui.aspectRatioAdjustmentComboBox->currentText());
   } else {
-    std::cerr << qPrintable(tr("Couldn't read content of: %1").arg(input)) << std::endl;
+    std::cerr << qPrintable(tr("Couldn't read content of: %1").arg(m_currentInput)) << std::endl;
     return false;
   }
   if (!newContent.isEmpty()) { //create new modfied avs file
@@ -651,7 +665,8 @@ bool avsViewer::adjustScript(QString& input, bool& invokeFFInfo)
     QString name = getFileName(m_currentInput);
     m_avsModified = QDir::toNativeSeparators(directory + QDir::separator() + name + "_tmp.avs");
     if (saveTextTo(newContent, m_avsModified) == 0) {
-      input = m_avsModified;
+      m_currentInput = m_avsModified;
+      std::cout << "changed content, using: " << qPrintable(m_currentInput) << std::endl;
     }
     m_currentScriptContent = newContent;
   }
@@ -723,9 +738,8 @@ int avsViewer::init(int start)
   if (!this->initEnv()) {
     return -3;
   }
-  QString input;
   bool invokeFFInfo = false;
-  if (!this->adjustScript(input, invokeFFInfo)){
+  if (!this->adjustScript(invokeFFInfo)){
     return -4;
   }
   if (!setRessource()) {
