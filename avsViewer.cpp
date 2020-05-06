@@ -27,10 +27,10 @@ avsViewer::avsViewer(QWidget *parent, const QString& path, const double& mult, c
         m_currentInput(path), m_version(QString()), m_avsModified(QString()),
         m_inputPath(QString()), m_res(0), m_mult(mult), m_currentImage(),
         m_dualView(false), m_desktopWidth(1920), m_desktopHeight(1080),
-        m_ipcID(ipcID), m_currentContent(QString()), m_ipcServer(nullptr), m_ipcClient(nullptr),
+        m_ipcID(ipcID), m_currentScriptContent(QString()), m_ipcServer(nullptr), m_ipcClient(nullptr),
         m_matrix(matrix), m_showLabel(new QLabel()), m_zoom(1),
         m_currentFrameWidth(0), m_currentFrameHeight(0), m_fill(0), m_noAddBorders(false), m_env(nullptr),
-        m_inf(nullptr), m_currentScriptContent()
+        m_inf(nullptr), m_providedInput(path)
 {
   ui.setupUi(this);
   QString stylepath = QApplication::applicationDirPath()+"/avsViewer.style";
@@ -270,11 +270,19 @@ void avsViewer::refresh()
 
 void avsViewer::on_infoCheckBox_toggled()
 {
+  if (!ui.infoCheckBox->isChecked()) {
+    std::cout << "resetting input,.. (info)" << std::endl;
+    m_currentInput = m_providedInput;
+  }
   this->refresh();
 }
 
 void avsViewer::on_histogramCheckBox_toggled()
 {
+  if (!ui.histogramCheckBox->isChecked()) {
+    std::cout << "resetting input,.. (histogram)" << std::endl;
+    m_currentInput = m_providedInput;
+  }
   this->refresh();
 }
 
@@ -394,6 +402,9 @@ void addShowInfoToContent(const int distributorIndex, const bool ffmpegSource,
   if (ffmpegSource) {
     if (distributorIndex != -1) { // contains distributor
       newContent = content;
+      if (newContent.contains(QString("FFInfo("))) {
+        return;
+      }
       newContent = newContent.remove(distributorIndex, newContent.size()).trimmed();
       if (!ffms2Line.isEmpty()) {
         newContent += "\n";
@@ -428,18 +439,27 @@ void addShowInfoToContent(const int distributorIndex, const bool ffmpegSource,
     }
   } else if (mpeg2source) {
     newContent = content;
+    if (newContent.contains(QString("Info("))) {
+      return;
+    }
     newContent = newContent.replace(".d2v\"", ".d2v\", info=1", Qt::CaseInsensitive);
   } else if (dgnvsource) {
+    if (newContent.contains(QString("Info("))) {
+      return;
+    }
     newContent = content;
-    newContent = newContent.replace(".dgi\"", ".dgi\", debug=true", Qt::CaseInsensitive);
+    newContent = newContent.replace(".dgi\"", ".dgi\", show=true", Qt::CaseInsensitive);
   } else if (distributorIndex != -1) { // contains distributor
+    if (newContent.contains(QString("Info("))) {
+      return;
+    }
       newContent = content;
       newContent = newContent.remove(distributorIndex, newContent.size()).trimmed();
       newContent += "\n";
       newContent += "Info()";
       newContent += "\n";
       newContent += "return last";
-  } else {
+  } else if (!content.contains(QString("Info("))) {
       newContent = content;
       int index = newContent.lastIndexOf("return");
       if (index != -1) {
@@ -447,7 +467,8 @@ void addShowInfoToContent(const int distributorIndex, const bool ffmpegSource,
       }
       newContent += "Info()";
       newContent += "\n";
-      newContent += "return last";}
+      newContent += "return last";
+  }
 }
 
 void addHistrogramToContent(const QString& content, QString &newContent, const QString& matrix)
@@ -457,6 +478,9 @@ void addHistrogramToContent(const QString& content, QString &newContent, const Q
   }
   int index1 = newContent.indexOf("# adjust color to RGB32");
   int index = newContent.indexOf("StackHorizontal(Source, SourceFiltered)");
+  if (newContent.contains(QString("Histogram("))) {
+    return;
+  }
   if (index == -1 && index1 != -1) { // no split view
       if (matrix.isEmpty()) {
         newContent.insert(index1,"\nConvertToYV12().ColorYUV(analyze=true)\nHistogram(mode=\"levels\")\n");
@@ -583,7 +607,7 @@ QString avsViewer::getCurrentInput(const QString& script)
 void avsViewer::changeTo(const QString& input, const QString& value)
 {
   int currentPosition = 0;
-  QString currentInput = getCurrentInput(m_currentContent); // the input of the avisynth script
+  QString currentInput = getCurrentInput(m_currentScriptContent); // the input of the avisynth script
   QFile file(value);
   QString newContent;
   sendMessageToSever(QString("reading file,..."));
@@ -602,6 +626,8 @@ void avsViewer::changeTo(const QString& input, const QString& value)
   }
   this->killEnv(); // killing old Avisynth environment
   m_currentInput = value; //set current input
+  std::cout << "setting provided input,.. (changeTo)";
+  m_providedInput = value;
   m_showLabel->setText(tr("Preparing environment for %1").arg(m_currentInput));
   this->init(currentPosition);
 }
@@ -609,7 +635,7 @@ void avsViewer::changeTo(const QString& input, const QString& value)
 void avsViewer::callMethod(const QString& typ, const QString& value, const QString &input)
 {
   if (!QFile::exists(value)){
-    std::cerr << qPrintable(QString("Change ignored since '%1' doesn't exist.").arg(value)) << std::endl;
+    std::cout << qPrintable(QString("Change ignored since '%1' doesn't exist.").arg(value)) << std::endl;
     return;
   }
   this->setWindowTitle(QString("%1, %2:\n%3").arg(typ).arg(value).arg(input));
@@ -641,9 +667,7 @@ bool avsViewer::adjustScript(bool& invokeFFInfo)
       nocomments << line;
     }
     content = lines.join("\n");
-    m_currentScriptContent = content;
     file.close();
-    m_currentContent = content;
     m_dualView = content.contains("SourceFiltered = Source");
     checkInputType(content, ffmpegSource, mpeg2source, dgnvsource, ffms2Line);
     ui.infoCheckBox->setEnabled(true);
@@ -663,11 +687,13 @@ bool avsViewer::adjustScript(bool& invokeFFInfo)
   if (!newContent.isEmpty()) { //create new modfied avs file
     QString directory = getDirectory(m_currentInput);
     QString name = getFileName(m_currentInput);
+    name = name.remove(QString("_tmp"));
     m_avsModified = QDir::toNativeSeparators(directory + QDir::separator() + name + "_tmp.avs");
     if (saveTextTo(newContent, m_avsModified) == 0) {
       m_currentInput = m_avsModified;
       std::cout << "changed content, using: " << qPrintable(m_currentInput) << std::endl;
     }
+    std::cout << "changing script content (adjustScript),.." << std::endl;
     m_currentScriptContent = newContent;
   }
   return true;

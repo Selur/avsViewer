@@ -31,7 +31,7 @@ class avsViewer : public QWidget
     QImage m_currentImage;
     bool m_dualView;
     int m_desktopWidth, m_desktopHeight;
-    QString m_ipcID, m_currentContent;
+    QString m_ipcID, m_currentScriptContent;
     LocalSocketIpcServer* m_ipcServer;
     LocalSocketIpcClient* m_ipcClient;
     QString m_matrix;
@@ -43,7 +43,7 @@ class avsViewer : public QWidget
     bool m_noAddBorders;
     IScriptEnvironment* m_env;
     const VideoInfo* m_inf;
-    QString m_currentScriptContent;
+    QString m_providedInput;
     void showFrame(const int &frame);
     int init(int start = 0);
     bool initEnv();
