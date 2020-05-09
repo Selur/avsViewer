@@ -36,19 +36,12 @@ avsViewer::avsViewer(QWidget *parent, const QString& path, const double& mult, c
   QString stylepath = QApplication::applicationDirPath()+"/avsViewer.style";
   stylepath = QDir::toNativeSeparators(stylepath);
   if (QFile::exists(stylepath)) {
-   QFile file(stylepath);
-   if (file.open(QIODevice::ReadOnly)) {
-     QString style = file.readAll();
-     this->setStyleSheet(style);
-   }
+    QFile file(stylepath);
+    if (file.open(QIODevice::ReadOnly)) {
+      QString style = file.readAll();
+      this->setStyleSheet(style);
+    }
   }
-  if (m_currentInput.isEmpty()) {
-    return;
-  }
-  m_showLabel->setText(tr("Preparing environment for %1").arg(m_currentInput));
-  ui.scrollArea->setWidget(m_showLabel);
-  delete ui.openAvsPushButton;
-
   QScreen *screen = QGuiApplication::primaryScreen();
   QRect  screenGeometry = screen->geometry();
   int height = screenGeometry.height();
@@ -56,6 +49,12 @@ avsViewer::avsViewer(QWidget *parent, const QString& path, const double& mult, c
   m_desktopWidth = width;
   m_desktopHeight = height;
   std::cout << "-> using desktop resolution: " << m_desktopWidth << "x" << m_desktopHeight << std::endl;
+  ui.scrollArea->setWidget(m_showLabel);
+  if (m_currentInput.isEmpty()) {
+    return;
+  }
+  m_showLabel->setText(tr("Preparing environment for %1").arg(m_currentInput));
+  delete ui.openAvsPushButton;
   this->init(0);
 }
 
