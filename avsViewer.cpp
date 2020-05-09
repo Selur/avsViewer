@@ -587,7 +587,6 @@ void avsViewer::receivedMessage(const QString& message)
 
 QString avsViewer::getCurrentInput(const QString& script)
 {
-  this->sendMessageToSever(QString("grabbing input,.."));
   if (script.isEmpty()) {
     return QString();
   }
@@ -617,11 +616,10 @@ void avsViewer::changeTo(const QString& input, const QString& value)
   QString newInput = getCurrentInput(newContent); // the input of the avisynth script
   if (newInput.isEmpty()) {
     newInput = input;
-    sendMessageToSever(QString("changing input to: %1").arg(input));
   }
-
   if (currentInput == newInput) { // input didn't change keeping position
     currentPosition = m_current;
+    std::cout << qPrintable(QString("keeping current position: %1").arg(currentPosition)) << std::endl;
   }
   this->killEnv(); // killing old Avisynth environment
   m_currentInput = value; //set current input
@@ -666,6 +664,9 @@ bool avsViewer::adjustScript(bool& invokeFFInfo)
       nocomments << line;
     }
     content = lines.join("\n");
+    if (m_currentScriptContent.isEmpty()) {
+      m_currentScriptContent = content;
+    }
     file.close();
     m_dualView = content.contains("SourceFiltered = Source");
     checkInputType(content, ffmpegSource, mpeg2source, dgnvsource, ffms2Line);
@@ -1164,6 +1165,7 @@ void avsViewer::on_openAvsPushButton_clicked()
     std::cerr << "Current input is empty or not an .avs file,.." << std::endl;
     return;
   }
+  m_currentScriptContent = QString();
   this->killEnv();
 
   m_currentInput = input; //set current input
