@@ -10,6 +10,8 @@
 #include <QPixmap>
 #include <QLabel>
 #include <QFile>
+#include <QLibrary>
+
 
 class LocalSocketIpcServer;
 class LocalSocketIpcClient;
@@ -44,6 +46,7 @@ class avsViewer : public QWidget
     IScriptEnvironment* m_env;
     const VideoInfo* m_inf;
     QString m_providedInput;
+    QLibrary m_avsDLL;
     void showFrame(const int &frame);
     int init(int start = 0);
     bool initEnv();
