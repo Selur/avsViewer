@@ -50,16 +50,16 @@ avsViewer::avsViewer(QWidget *parent, const QString& path, const double& mult, c
   m_desktopHeight = height;
   std::cout << "-> using desktop resolution: " << m_desktopWidth << "x" << m_desktopHeight << std::endl;
   ui.scrollArea->setWidget(m_showLabel);
-  if (m_currentInput.isEmpty()) {
-    return;
-  }
-  m_showLabel->setText(tr("Preparing environment for %1").arg(m_currentInput));
-  delete ui.openAvsPushButton;
   QString avisynthDll = QDir::toNativeSeparators(qApp->applicationDirPath() + QDir::separator() + QString("AviSynth.dll"));
   if (!QFile::exists(avisynthDll)) {
     avisynthDll = QString("AviSynth.dll");
   }
   m_avsDLL.setFileName(avisynthDll);
+  if (m_currentInput.isEmpty()) {
+    return;
+  }
+  m_showLabel->setText(tr("Preparing environment for %1").arg(m_currentInput));
+  delete ui.openAvsPushButton;
   this->init(0);
 }
 
@@ -89,21 +89,28 @@ avsViewer::~avsViewer()
   std::cout << qPrintable(tr("finished,...")) << std::endl;
 }
 
+bool avsViewer::loadAvisynthDLL()
+{
+  if (m_avsDLL.isLoaded()) {
+    return true;
+  }
+  if (!m_avsDLL.load()) {
+    QString error = m_avsDLL.errorString();
+    if (!error.isEmpty()) {
+      std::cerr << "Could not load avisynth.dll! " << std::endl << qPrintable(error) << std::endl;
+      return false;
+    }
+    std::cerr << "Could not load avisynth.dll!" << std::endl;
+    return false;
+  }
+  std::cout << "loaded avisynth dll,..(" << qPrintable(m_avsDLL.fileName()) << ")" << std::endl;
+  return true;
+}
+
 bool avsViewer::initEnv()
 {
   //load avisynth.dll if it's not already loaded and abort if it couldn't be loaded
-  if (!m_avsDLL.isLoaded()) {
-    if (!m_avsDLL.load()) {
-      QString error = m_avsDLL.errorString();
-      if (!error.isEmpty()) {
-        std::cerr << "Could not load avisynth.dll! " << std::endl << qPrintable(error) << std::endl;
-        return false;
-      }
-      std::cerr << "Could not load avisynth.dll!" << std::endl;
-      return false;
-    }
-    std::cout << "loaded avisynth dll,..(" << qPrintable(m_avsDLL.fileName()) << ")" << std::endl;
-  }
+  this->loadAvisynthDLL();
   // delete script environment in case it exists
   if (m_env != nullptr) {
     m_env->DeleteScriptEnvironment();
@@ -113,8 +120,11 @@ bool avsViewer::initEnv()
   std::cout << "loaded CreateScriptEnvironment definition from dll,.. " << std::endl;
   m_env = CreateScriptEnvironment(AVISYNTH_INTERFACE_VERSION); //create a new IScriptEnvironment
   if (!m_env) { //abort if IScriptEnvironment couldn't be created
-    std::cerr << "Could not create IScriptenvironment,..." << std::endl;
-    return false;
+    m_env = CreateScriptEnvironment(AVISYNTH_CLASSIC_INTERFACE_VERSION); //create a new IScriptEnvironment
+    if (!m_env) { //abort if IScriptEnvironment couldn't be created
+      std::cerr << "Could not create IScriptenvironment,..." << std::endl;
+      return false;
+    }
   }
   return true;
 }

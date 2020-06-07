@@ -74,6 +74,7 @@ class avsViewer : public QWidget
     unsigned char *getFrameData(const int &i, const int &count);
     void outputResType();
     void applyResolution(const QString& content, QString &newContent, double mult, const QString& resize);
+    bool loadAvisynthDLL();
 
   private slots:
     void on_frameHorizontalSlider_valueChanged(int value);
