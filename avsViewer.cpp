@@ -110,7 +110,9 @@ bool avsViewer::loadAvisynthDLL()
 bool avsViewer::initEnv()
 {
   //load avisynth.dll if it's not already loaded and abort if it couldn't be loaded
-  this->loadAvisynthDLL();
+  if (!this->loadAvisynthDLL()) {
+    return false;
+  }
   // delete script environment in case it exists
   if (m_env != nullptr) {
     m_env->DeleteScriptEnvironment();
