@@ -30,7 +30,7 @@ avsViewer::avsViewer(QWidget *parent, const QString& path, const double& mult, c
         m_ipcID(ipcID), m_currentScriptContent(QString()), m_ipcServer(nullptr), m_ipcClient(nullptr),
         m_matrix(matrix), m_showLabel(new QLabel()), m_zoom(1),
         m_currentFrameWidth(0), m_currentFrameHeight(0), m_fill(0), m_noAddBorders(false), m_env(nullptr),
-        m_inf(nullptr), m_providedInput(path), m_avsDLL(this)
+        m_inf(nullptr), m_providedInput(path), m_avsDLL(this), m_showOnly(false)
 {
   ui.setupUi(this);
   QString stylepath = QApplication::applicationDirPath()+"/avsViewer.style";
@@ -60,6 +60,8 @@ avsViewer::avsViewer(QWidget *parent, const QString& path, const double& mult, c
   }
   m_showLabel->setText(tr("Preparing environment for %1").arg(m_currentInput));
   delete ui.openAvsPushButton;
+  delete ui.histogramCheckBox;
+  m_showOnly = true;
   this->init(0);
 }
 
@@ -134,11 +136,11 @@ bool avsViewer::initEnv()
 bool avsViewer::setRessource()
 {
   try {
-
     AVS_linkage = m_env->GetAVSLinkage();
     const char* infile = m_currentInput.toLocal8Bit(); //convert input name to char*
     std::cout << "Importing " << infile << std::endl;
-    m_res = m_env->Invoke("Import", infile); //import current input to environment
+    AVSValue arg(infile);
+    m_res = m_env->Invoke("Import", AVSValue(&arg, 1));
     if (!m_res.IsClip()) {
        std::cerr << "Couldn't load input, not a clip!" << std::endl;
        return false;
@@ -302,6 +304,9 @@ void avsViewer::on_infoCheckBox_toggled()
 
 void avsViewer::on_histogramCheckBox_toggled()
 {
+  if (m_showOnly) {
+    return;
+  }
   if (!ui.histogramCheckBox->isChecked()) {
     std::cout << "resetting input,.. (histogram)" << std::endl;
     m_currentInput = m_providedInput;
@@ -499,7 +504,16 @@ void addHistrogramToContent(const QString& content, QString &newContent, const Q
   if (newContent.isEmpty()) {
     newContent = content;
   }
-  int index1 = newContent.indexOf("# adjust color to RGB32");
+  int index1 = newContent.lastIndexOf("ConvertToRGB32(");
+  if (index1 == -1){
+    index1 = newContent.lastIndexOf("PreFetch(");
+  }
+  if (index1 == -1){
+    index1 = newContent.lastIndexOf("PreFetch(");
+  }
+  if (index1 == -1){
+    index1 = newContent.lastIndexOf("return ");
+  }
   int index = newContent.indexOf("StackHorizontal(Source, SourceFiltered)");
   if (newContent.contains(QString("Histogram("))) {
     return;
@@ -559,21 +573,7 @@ void avsViewer::applyResolution(const QString& content, QString &newContent, dou
     newContent = content;
   }
   newContent = newContent.trimmed();
-  QString resizer;
-  if (m_inf->IsFieldBased() && !m_inf->IsRGB()) {
-    resizer = resize + "Resize(Ceil(last.Width*" + QString::number(mult) + "), last.Height)\n";
-    /*
-    Separatefields()
-    Shift=(Height()/Float(new_height/2)-1.0)*0.25 # Field shift correction
-    even=SelectEven().Spline36Resize(new_width, new_height/2, 0, -Shift, Width(), Height())
-    odd=SelectOdd().Spline36Resize(new_width, new_height/2, 0, Shift, Width(), Height())
-    Interleave(even,odd)
-    Assumefieldbased().AssumeTFF().Weave()
-    */
-  } else {
-    resizer = resize + "Resize(Ceil(last.Width*" + QString::number(mult) + "), last.Height)\n";
-  }
-
+  QString resizer = resize + "Resize(Ceil(last.Width*" + QString::number(mult) + "), last.Height)\n";
   int index = newContent.indexOf("distributor()", Qt::CaseInsensitive);
   if (index != -1) { // add before distributor
     newContent.insert(index, resizer);
@@ -593,7 +593,7 @@ void avsViewer::receivedMessage(const QString& message)
   if (message.isEmpty()) {
     return;
   }
-  this->setWindowTitle(message);
+  this->setWindowTitle(message + QString(" (matrix: %1)").arg(m_matrix));
   QStringList typeAndValue = message.split(SEP1);
   switch (typeAndValue.count())
   {
@@ -645,12 +645,17 @@ void avsViewer::changeTo(const QString& input, const QString& value)
     currentPosition = m_current;
     std::cout << qPrintable(QString("keeping current position: %1").arg(currentPosition)) << std::endl;
   }
+  bool scrolling = ui.scrollingCheckBox->isChecked();
   this->killEnv(); // killing old Avisynth environment
   m_currentInput = value; //set current input
   std::cout << "setting provided input,.. (changeTo)";
   m_providedInput = value;
   m_showLabel->setText(tr("Preparing environment for %1").arg(m_currentInput));
   this->init(currentPosition);
+  if (scrolling) {
+    this->resize(this->size().width()+2, this->size().height()+2);
+    this->resize(this->size().width()-2, this->size().height()-2);
+  }
 }
 
 void avsViewer::callMethod(const QString& typ, const QString& value, const QString &input)
@@ -659,7 +664,7 @@ void avsViewer::callMethod(const QString& typ, const QString& value, const QStri
     std::cout << qPrintable(QString("Change ignored since '%1' doesn't exist.").arg(value)) << std::endl;
     return;
   }
-  this->setWindowTitle(QString("%1, %2:\n%3").arg(typ).arg(value).arg(input));
+  this->setWindowTitle(QString("%1, %2: %3 (matrix: %4)").arg(typ).arg(value).arg(input).arg(m_matrix));
   if (typ == "changeTo") {
     this->changeTo(input, value);
     return;
@@ -700,7 +705,7 @@ bool avsViewer::adjustScript(bool& invokeFFInfo)
       int index = content.indexOf("distributor()", Qt::CaseInsensitive);
       addShowInfoToContent(index, ffmpegSource, content, newContent, ffms2Line, invokeFFInfo, mpeg2source, dgnvsource);
     }
-    if (ui.histogramCheckBox->isChecked()) {
+    if (!m_showOnly && ui.histogramCheckBox->isChecked()) {
       addHistrogramToContent(content, newContent, m_matrix);
     }
     applyResolution(content, newContent, m_mult, ui.aspectRatioAdjustmentComboBox->currentText());
@@ -792,7 +797,7 @@ int avsViewer::init(int start)
   if (!this->adjustScript(invokeFFInfo)){
     return -4;
   }
-  if (!setRessource()) {
+  if (!this->setRessource()) {
     return -5;
   }
   if (!this->setVideoInfo()) {
@@ -810,9 +815,7 @@ int avsViewer::init(int start)
   } else {
     ui.scrollArea->setHorizontalScrollBarPolicy( Qt::ScrollBarAlwaysOff );
     ui.scrollArea->setVerticalScrollBarPolicy( Qt::ScrollBarAlwaysOff );
-    ui.scrollArea->verticalScrollBar()->resize(0, 0);
     ui.scrollArea->verticalScrollBar()->hide();
-    ui.scrollArea->horizontalScrollBar()->resize(0, 0);
     ui.scrollArea->horizontalScrollBar()->hide();
   }
   bool reload = false;
@@ -846,7 +849,12 @@ int avsViewer::init(int start)
   ui.frameHorizontalSlider->setMaximum(m_frameCount -1);
   ui.jumpToSpinBox->setMaximum(m_frameCount -1);
   ui.frameHorizontalSlider->resetMarks();
-  this->adjustLabelSize(changeLabelSize && (firstTime || ui.histogramCheckBox->isChecked() || !scrolling), width, height); // adjust label size
+  if (!m_showOnly) {
+    this->adjustLabelSize(changeLabelSize && (firstTime || ui.histogramCheckBox->isChecked() || !scrolling), width, height); // adjust label size
+  } else {
+    this->adjustLabelSize(changeLabelSize && (firstTime || !scrolling), width, height); // adjust label size
+  }
+
   if (start < 0) {
     start = 0;
   }
@@ -854,9 +862,16 @@ int avsViewer::init(int start)
   this->adjustWindowSize(changeLabelSize, width, height);
   this->sendMessageToSever(tr("finished initializing the avisynth script environment,.."));
 
-  if ((!firstTime && !ui.histogramCheckBox->isChecked()) || this->isFullScreen()) {
-    return 0;
+  if (!m_showOnly) {
+    if ((!firstTime && !ui.histogramCheckBox->isChecked()) || this->isFullScreen()) {
+      return 0;
+    }
+  } else {
+    if (!firstTime || this->isFullScreen()) {
+      return 0;
+    }
   }
+
   if (changeLabelSize && !scrolling) {
     m_showLabel->resize(ui.scrollArea->size());
   }
@@ -1132,7 +1147,7 @@ void avsViewer::showFrame(const int& i)
         title += " " + tr("(input: %1)").arg(m_currentInput);
       }
     }
-    this->setWindowTitle(title);
+    this->setWindowTitle(title + QString(" (matrix: %1)").arg(m_matrix));
   } catch (...) {
     std::cerr << " couldn't show frame,..." << "(" << i << ")" << std::endl;
   }

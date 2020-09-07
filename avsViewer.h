@@ -47,7 +47,8 @@ class avsViewer : public QWidget
     const VideoInfo* m_inf;
     QString m_providedInput;
     QLibrary m_avsDLL;
-    void showFrame(const int &frame);
+    bool m_showOnly;
+    void showFrame(const int &i);
     int init(int start = 0);
     bool initEnv();
 

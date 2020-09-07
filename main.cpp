@@ -11,7 +11,6 @@ int main(int argc, char *argv[])
   QApplication a(argc, argv);
   QString path;
   double mult = 0;
-  bool localSocket = false;
   QString ipcID;
   QString matrix;
   QString option;
@@ -31,7 +30,6 @@ int main(int argc, char *argv[])
       continue;
     }
     if (option == "--listen" && i+1 <= argc) {
-      localSocket = true;
       ipcID = QString(argv[++i]);
       cout << qPrintable(QObject::tr("server id: %1").arg(ipcID)) << endl;
       continue;
@@ -42,8 +40,6 @@ int main(int argc, char *argv[])
       continue;
     }
   }
-
-  //avsViewer(QWidget *parent, QString path, double mult, QString ipcID)
   avsViewer w(0, path, mult, ipcID, matrix);
   w.setAttribute(Qt::WA_QuitOnClose);
   w.show();
