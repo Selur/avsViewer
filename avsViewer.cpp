@@ -5,7 +5,7 @@
 #include <iostream>
 #include <QLibrary>
 #include <QFileInfo>
-#include <QTextCodec>
+//#include <QTextCodec>
 #include <QMessageBox>
 #include <QFileDialog>
 #include <QStringList>
@@ -320,7 +320,7 @@ void avsViewer::on_scrollingCheckBox_toggled()
   this->refresh();
 }
 
-void avsViewer::on_aspectRatioAdjustmentComboBox_currentIndexChanged(const QString& value)
+void avsViewer::on_aspectRatioAdjustmentComboBox_currentTextChanged(const QString& value)
 {
   Q_UNUSED(value);
   this->refresh();
@@ -381,7 +381,11 @@ int saveTextTo(const QString& text, const QString& to)
   file.remove();
   if (file.open(QIODevice::WriteOnly | QIODevice::Text)) {
     QTextStream out(&file);
-    out.setCodec("System");
+#if (QT_VERSION >= QT_VERSION_CHECK(6,0,0))
+  out.setEncoding(QStringConverter::System);
+#else
+  out.setCodec("System");
+#endif
     out << text;
     if (file.exists()) {
       file.close();
@@ -822,7 +826,7 @@ int avsViewer::init(int start)
   if (!m_inf->IsRGB32()) { // make sure color is RGB32
     sendMessageToSever(QString("Current color space: %1").arg(this->getColor()));
     if (!this->invokeFunction("ConvertToRGB32")) {
-       std::cerr << qPrintable(tr("Couldn't invoke 'ConvertToTGB()' -> aborting")) << std::endl;
+       std::cerr << qPrintable(tr("Couldn't invoke 'ConvertToRGB32()' -> aborting")) << std::endl;
       this->killEnv();
       return -9;
     }

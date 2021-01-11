@@ -6,7 +6,12 @@ CONFIG += console
 
 win32-msvc* {
     message(Building for Windows using Qt $$QT_VERSION)
-    CONFIG += c++11
+    lessThan(QT_MAJOR_VERSION, 6) {
+      CONFIG += c++11 # C++11 support
+    } else {
+      CONFIG += c++17 # C++11 support
+      QMAKE_CXXFLAGS += /std:c++17
+    }
     QMAKE_CXXFLAGS_RELEASE += -MP
     QMAKE_LFLAGS += /LARGEADDRESSAWARE
     # for Windows XP compatibility

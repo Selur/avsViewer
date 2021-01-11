@@ -86,7 +86,7 @@ class avsViewer : public QWidget
     void on_infoCheckBox_toggled();
     void on_histogramCheckBox_toggled();
     void on_saveImagePushButton_clicked();
-    void on_aspectRatioAdjustmentComboBox_currentIndexChanged(const QString &value);
+    void on_aspectRatioAdjustmentComboBox_currentTextChanged(const QString &value);
     void fromConsoleReader(QString text);
     void receivedMessage(const QString& message);
     void on_jumpBackwardPushButton_clicked();

@@ -19,7 +19,11 @@ LocalSocketIpcClient::LocalSocketIpcClient(const QString& remoteServername, QObj
   connect(m_socket, SIGNAL(disconnected()), this, SLOT(socket_disconnected()));
 
   connect(m_socket, SIGNAL(readyRead()), this, SLOT(socket_readReady()));
+#if (QT_VERSION < QT_VERSION_CHECK(6, 0, 0))
   connect(m_socket, SIGNAL(error(QLocalSocket::LocalSocketError)), this, SLOT(socket_error(QLocalSocket::LocalSocketError)));
+#else
+  connect(m_socket, SIGNAL(errorOccurred(QLocalSocket::LocalSocketError)), this, SLOT(socket_error(QLocalSocket::LocalSocketError)));
+#endif
 }
 
 LocalSocketIpcClient::~LocalSocketIpcClient()
