@@ -797,16 +797,20 @@ int avsViewer::init(int start)
   if (!this->initEnv()) {
     return -3;
   }
+  qApp->processEvents();
   bool invokeFFInfo = false;
   if (!this->adjustScript(invokeFFInfo)){
     return -4;
   }
+  qApp->processEvents();
   if (!this->setRessource()) {
     return -5;
   }
+  qApp->processEvents();
   if (!this->setVideoInfo()) {
     return -6;
   }
+  qApp->processEvents();
   this->showVideoInfo();
   bool scrolling = ui.scrollingCheckBox->isChecked();
   if (scrolling) {

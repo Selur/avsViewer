@@ -25,7 +25,12 @@ greaterThan(QT_MAJOR_VERSION, 4) { # QT5+
 CODECFORSRC = UTF-8
 CODECFORTR = UTF-8
 TEMPLATE = app
-TARGET = avsViewer
+contains(QMAKE_HOST.arch, x86_64) {
+  TARGET = avsViewer64
+} else {
+  TARGET = avsViewer
+}
+
 HEADERS += LocalSocketIpcServer.h \
     LocalSocketIpcClient.h \
     avsViewer.h \
