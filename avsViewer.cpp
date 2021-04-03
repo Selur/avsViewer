@@ -58,7 +58,6 @@ avsViewer::avsViewer(QWidget *parent, const QString& path, const double& mult, c
   if (m_currentInput.isEmpty()) {
     return;
   }
-  m_showLabel->setText(tr("Preparing environment for %1").arg(m_currentInput));
   delete ui.openAvsPushButton;
   delete ui.histogramCheckBox;
   m_showOnly = true;
@@ -666,7 +665,6 @@ void avsViewer::changeTo(const QString& input, const QString& value)
   m_currentInput = value; //set current input
   std::cout << "setting provided input,.. (changeTo)";
   m_providedInput = value;
-  m_showLabel->setText(tr("Preparing environment for %1").arg(m_currentInput));
   this->init(currentPosition);
   if (scrolling) {
 
@@ -1241,7 +1239,6 @@ void avsViewer::on_openAvsPushButton_clicked()
   this->killEnv();
 
   m_currentInput = input; //set current input
-  m_showLabel->setText(tr("Preparing environment for %1").arg(m_currentInput));
   this->init();
 }
 
