@@ -633,6 +633,19 @@ QString avsViewer::getCurrentInput(const QString& script)
 void avsViewer::changeTo(const QString& input, const QString& value)
 {
   int currentPosition = 0;
+  bool scrolling = ui.scrollingCheckBox->isChecked();
+  int hPos, vPos;
+  bool hVisible = false, vVisible = false;
+  int hMax = 0, vMax = 0;
+  if (scrolling) {
+    hPos = ui.scrollArea->horizontalScrollBar()->sliderPosition();
+    hVisible = ui.scrollArea->horizontalScrollBar()->isVisible();
+    hMax = ui.scrollArea->horizontalScrollBar()->maximum();
+    vPos = ui.scrollArea->verticalScrollBar()->sliderPosition();
+    vVisible = ui.scrollArea->verticalScrollBar()->isVisible();
+    vMax = ui.scrollArea->verticalScrollBar()->maximum();
+  }
+
   QString currentInput = getCurrentInput(m_currentScriptContent); // the input of the avisynth script
   QFile file(value);
   QString newContent;
@@ -649,7 +662,6 @@ void avsViewer::changeTo(const QString& input, const QString& value)
     currentPosition = m_current;
     std::cout << qPrintable(QString("keeping current position: %1").arg(currentPosition)) << std::endl;
   }
-  bool scrolling = ui.scrollingCheckBox->isChecked();
   this->killEnv(); // killing old Avisynth environment
   m_currentInput = value; //set current input
   std::cout << "setting provided input,.. (changeTo)";
@@ -657,6 +669,19 @@ void avsViewer::changeTo(const QString& input, const QString& value)
   m_showLabel->setText(tr("Preparing environment for %1").arg(m_currentInput));
   this->init(currentPosition);
   if (scrolling) {
+
+    ui.scrollArea->horizontalScrollBar()->setVisible(hVisible);
+    if (hVisible) {
+      ui.scrollArea->horizontalScrollBar()->setMaximum(hMax);
+      ui.scrollArea->horizontalScrollBar()->adjustSize();
+      ui.scrollArea->horizontalScrollBar()->setSliderPosition(hPos);
+    }
+    ui.scrollArea->verticalScrollBar()->setVisible(vVisible);
+    if (vVisible) {
+      ui.scrollArea->verticalScrollBar()->setMaximum(vMax);
+      ui.scrollArea->verticalScrollBar()->adjustSize();
+      ui.scrollArea->verticalScrollBar()->setSliderPosition(vPos);
+    }
     this->resize(this->size().width()+2, this->size().height()+2);
     this->resize(this->size().width()-2, this->size().height()-2);
   }
