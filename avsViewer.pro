@@ -11,6 +11,8 @@ win32-msvc* {
     } else {
       CONFIG += c++17 # C++11 support
       QMAKE_CXXFLAGS += /std:c++17
+      QMAKE_CXXFLAGS += /Zc:__cplusplus
+      QMAKE_CXXFLAGS_RELEASE += /Zc:__cplusplus
     }
     QMAKE_CXXFLAGS_RELEASE += -MP
     QMAKE_LFLAGS += /LARGEADDRESSAWARE
