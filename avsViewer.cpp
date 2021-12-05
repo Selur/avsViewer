@@ -496,6 +496,7 @@ void addShowInfoToContent(const int distributorIndex, const bool ffmpegSource,
       if (index != -1) {
         newContent = newContent.remove(index, newContent.size()).trimmed();
       }
+      newContent += "\n";
       newContent += "Info()";
       newContent += "\n";
       newContent += "return last";
