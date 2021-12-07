@@ -451,7 +451,16 @@ void addShowInfoToContent(const int distributorIndex, const bool ffmpegSource,
       newContent += "return last";
     } else if (!ffms2Line.isEmpty()) {
       newContent = content;
-      int index = newContent.lastIndexOf("return");
+      int index = newContent.lastIndexOf(QString("PreFetch"), Qt::CaseInsensitive);
+      if (index != -1) {
+         QString addition = "\n";
+         addition += "Import(\"" + ffms2Line + "\")";
+         addition += "\n";
+         addition += "FFInfo()";
+         newContent = newContent.insert(index, addition);
+         return;
+      }
+      index = newContent.lastIndexOf("return");
       if (index != -1) {
         newContent = newContent.remove(index, newContent.size()).trimmed();
       }
