@@ -457,6 +457,7 @@ void addShowInfoToContent(const int distributorIndex, const bool ffmpegSource,
          addition += "Import(\"" + ffms2Line + "\")";
          addition += "\n";
          addition += "FFInfo()";
+         addition += "\n";
          newContent = newContent.insert(index, addition);
          return;
       }
@@ -493,22 +494,32 @@ void addShowInfoToContent(const int distributorIndex, const bool ffmpegSource,
     if (newContent.contains(QString("Info("))) {
       return;
     }
-      newContent = content;
-      newContent = newContent.remove(distributorIndex, newContent.size()).trimmed();
-      newContent += "\n";
-      newContent += "Info()";
-      newContent += "\n";
-      newContent += "return last";
+    newContent = content;
+    newContent = newContent.remove(distributorIndex, newContent.size()).trimmed();
+    newContent += "\n";
+    newContent += "Info()";
+    newContent += "\n";
+    newContent += "return last";
   } else if (!content.contains(QString("Info("))) {
-      newContent = content;
-      int index = newContent.lastIndexOf("return");
-      if (index != -1) {
-        newContent = newContent.remove(index, newContent.size()).trimmed();
-      }
-      newContent += "\n";
-      newContent += "Info()";
-      newContent += "\n";
-      newContent += "return last";
+    newContent = content;
+    int index = newContent.lastIndexOf(QString("PreFetch"), Qt::CaseInsensitive);
+    if (index != -1) {
+       QString addition = "\n";
+       addition += "Import(\"" + ffms2Line + "\")";
+       addition += "\n";
+       addition += "FFInfo()";
+       addition += "\n";
+       newContent = newContent.insert(index, addition);
+       return;
+    }
+    index = newContent.lastIndexOf("return");
+    if (index != -1) {
+      newContent = newContent.remove(index, newContent.size()).trimmed();
+    }
+    newContent += "\n";
+    newContent += "Info()";
+    newContent += "\n";
+    newContent += "return last";
   }
 }
 
