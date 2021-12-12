@@ -259,7 +259,7 @@ void avsViewer::on_saveImagePushButton_clicked()
   }
   m_inputPath = getDirectory(input);
   if (!m_currentImage.save(input, "PNG", 100)) {
-    QMessageBox::warning(this, "Error", tr("Couldn't save %1").arg(input));
+    QMessageBox::warning(nullptr, "Error", QObject::tr("Couldn't save %1").arg(input));
   }
   this->showFrame(m_current);
 }
@@ -425,17 +425,18 @@ void checkInputType(const QString& content, bool &ffmpegSource, bool &mpeg2sourc
     }
   }
 }
-
+#include <QMessageBox>
 void addShowInfoToContent(const int distributorIndex, const bool ffmpegSource,
     const QString& content, QString &newContent, const QString& ffms2Line,
     bool &invokeFFInfo, const bool mpeg2source, const bool dgnvsource)
 {
+  const QString prefetch = QString("PreFetch(");
   if (ffmpegSource) {
+    if (newContent.contains(QString("FFInfo("))) {
+      return;
+    }
     if (distributorIndex != -1) { // contains distributor
       newContent = content;
-      if (newContent.contains(QString("FFInfo("))) {
-        return;
-      }
       newContent = newContent.remove(distributorIndex, newContent.size()).trimmed();
       if (!ffms2Line.isEmpty()) {
         newContent += "\n";
@@ -451,7 +452,7 @@ void addShowInfoToContent(const int distributorIndex, const bool ffmpegSource,
       newContent += "return last";
     } else if (!ffms2Line.isEmpty()) {
       newContent = content;
-      int index = newContent.lastIndexOf(QString("PreFetch"), Qt::CaseInsensitive);
+      int index = content.lastIndexOf(prefetch);
       if (index != -1) {
          QString addition = "\n";
          addition += "Import(\"" + ffms2Line + "\")";
@@ -461,7 +462,7 @@ void addShowInfoToContent(const int distributorIndex, const bool ffmpegSource,
          newContent = newContent.insert(index, addition);
          return;
       }
-      index = newContent.lastIndexOf("return");
+      index = newContent.lastIndexOf("return ");
       if (index != -1) {
         newContent = newContent.remove(index, newContent.size()).trimmed();
       }
@@ -491,6 +492,7 @@ void addShowInfoToContent(const int distributorIndex, const bool ffmpegSource,
     newContent = content;
     newContent = newContent.replace(".dgi\"", ".dgi\", show=true", Qt::CaseInsensitive);
   } else if (distributorIndex != -1) { // contains distributor
+    QMessageBox::warning(nullptr, "Error", QObject::tr("PING 8"));
     if (newContent.contains(QString("Info("))) {
       return;
     }
@@ -502,7 +504,7 @@ void addShowInfoToContent(const int distributorIndex, const bool ffmpegSource,
     newContent += "return last";
   } else if (!content.contains(QString("Info("))) {
     newContent = content;
-    int index = newContent.lastIndexOf(QString("PreFetch"), Qt::CaseInsensitive);
+    int index = newContent.lastIndexOf(prefetch);
     if (index != -1) {
        QString addition = "\n";
        addition += "Import(\"" + ffms2Line + "\")";
@@ -512,7 +514,7 @@ void addShowInfoToContent(const int distributorIndex, const bool ffmpegSource,
        newContent = newContent.insert(index, addition);
        return;
     }
-    index = newContent.lastIndexOf("return");
+    index = newContent.lastIndexOf("return ");
     if (index != -1) {
       newContent = newContent.remove(index, newContent.size()).trimmed();
     }
@@ -529,9 +531,6 @@ void addHistrogramToContent(const QString& content, QString &newContent, const Q
     newContent = content;
   }
   int index1 = newContent.lastIndexOf("ConvertToRGB32(");
-  if (index1 == -1){
-    index1 = newContent.lastIndexOf("PreFetch(");
-  }
   if (index1 == -1){
     index1 = newContent.lastIndexOf("PreFetch(");
   }
