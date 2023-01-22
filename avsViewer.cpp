@@ -20,7 +20,7 @@
 #include <QScreen>
 
 const QString SEP1 = " ### ";
-const AVS_Linkage *AVS_linkage = nullptr;
+const AVS_Linkage *AVS_linkage = 0;
 
 avsViewer::avsViewer(QWidget *parent, const QString& path, const double& mult, const QString& ipcID, const QString& matrix)
     : QWidget(parent), ui(), m_frameCount(100), m_current(-1),
@@ -115,8 +115,10 @@ bool avsViewer::initEnv()
     return false;
   }
   // delete script environment in case it exists
-  if (m_env != nullptr) {
+  if (m_env != nullptr && m_env != 0) {
+    std::cout << "clear script environment" << std::endl;
     m_env->DeleteScriptEnvironment();
+    m_env = 0;
   }
   // create new script environment
   IScriptEnvironment* (*CreateScriptEnvironment)(int version) = (IScriptEnvironment*(*)(int)) m_avsDLL.resolve("CreateScriptEnvironment"); //resolve CreateScriptEnvironment from the dll
@@ -127,19 +129,26 @@ bool avsViewer::initEnv()
     if (!m_env) { //abort if IScriptEnvironment couldn't be created
       std::cerr << "Could not create IScriptenvironment,..." << std::endl;
       return false;
+    } else {
+      std::cerr << "Created script env (classic): " << AVISYNTH_CLASSIC_INTERFACE_VERSION << std::endl;
     }
+  } else {
+     std::cerr << "Created script env (current): " << AVISYNTH_INTERFACE_VERSION << std::endl;
   }
+
   return true;
 }
 
 bool avsViewer::setRessource()
 {
   try {
-    AVS_linkage = m_env->GetAVSLinkage();
-    const char* infile = m_currentInput.toLocal8Bit(); //convert input name to char*
+    QByteArray ba = m_currentInput.toLocal8Bit();
+    const char *infile = ba.data();
     std::cout << "Importing " << infile << std::endl;
-    AVSValue arg(infile);
-    m_res = m_env->Invoke("Import", AVSValue(&arg, 1));
+    AVS_linkage = m_env->GetAVSLinkage();
+    AVSValue filename = infile;
+    AVSValue args = AVSValue(&filename, 1);
+    m_res = m_env->Invoke("Import", args, 0);
     if (!m_res.IsClip()) {
        std::cerr << "Couldn't load input, not a clip!" << std::endl;
        return false;
@@ -152,9 +161,11 @@ bool avsViewer::setRessource()
       return false;
     }
     return true;
-  } catch (AvisynthError &err) { //catch AvisynthErrors
+  } catch (AvisynthError err) { //catch AvisynthErrors
     std::cerr << "-> " << err.msg << std::endl;
-  } catch (...) { //catch everything else
+  } catch( const std::exception & ex ) {
+    std::cout << ex.what() << std::endl;
+  }catch (...) { //catch everything else
     std::cerr << "-> setRessource: Unknown error" << std::endl;
   }
   return false;
@@ -266,12 +277,12 @@ void avsViewer::on_saveImagePushButton_clicked()
 
 void avsViewer::cleanUp()
 {
-  if (m_env != nullptr) {
+  if (m_env != 0) {
     this->sendMessageToSever("Clean up old script environment,..");
     m_res = 0;
     try {
       m_env->DeleteScriptEnvironment(); //delete the old script environment
-    } catch (AvisynthError &err) { //catch AvisynthErrors
+    } catch (AvisynthError err) { //catch AvisynthErrors
       std::cerr << "Failed to delete script environment " << err.msg << std::endl;
     } catch (...) {
       std::cerr << "Failed to delete script environment,.. (Unkown Error)" << std::endl;
@@ -778,11 +789,16 @@ bool avsViewer::adjustScript(bool& invokeFFInfo)
 bool avsViewer::invokeFunction(const QString& name)
 {
   try {
-    const char* function = name.toLocal8Bit();
+    QByteArray ba = name.toLocal8Bit();
+    const char *function = ba.data();
+    std::cerr << "invoking " << function << std::endl;
+    if (!m_env->FunctionExists(function)) {
+       m_env->ThrowError(ba + " does not exist!");
+    }
     m_res = m_env->Invoke(function, AVSValue(&m_res, 1)); //import current input to environment
-    std::cout << "invoked " << qPrintable(name) << std::endl;
+    std::cerr << "invoked " << function << std::endl;
     return true;
-  } catch (AvisynthError &err) { //catch AvisynthErrors
+  } catch (AvisynthError err) { //catch AvisynthErrors
     std::cerr << "Avisynth error " << qPrintable(m_currentInput) << ": " << std::endl << err.msg << std::endl;
   } catch (...) { //catch the rest
     std::cerr << "Unknown C++ exception" << std::endl;
@@ -831,7 +847,7 @@ int avsViewer::init(int start)
     sendMessageToSever(tr("Current input is empty,.."));
     return -1;
   }
-  if (m_env != nullptr) { //if I do not abort here application will crash on 'm_res.AsClip()' later
+  if (m_env != nullptr && m_env != 0) { //if I do not abort here application will crash on 'm_res.AsClip()' later
     std::cerr << qPrintable(tr("Init called on existing environment,..")) << std::endl;
     return -2;
   }
@@ -840,20 +856,16 @@ int avsViewer::init(int start)
   if (!this->initEnv()) {
     return -3;
   }
-  qApp->processEvents();
   bool invokeFFInfo = false;
   if (!this->adjustScript(invokeFFInfo)){
     return -4;
   }
-  qApp->processEvents();
   if (!this->setRessource()) {
     return -5;
   }
-  qApp->processEvents();
   if (!this->setVideoInfo()) {
     return -6;
   }
-  qApp->processEvents();
   this->showVideoInfo();
   bool scrolling = ui.scrollingCheckBox->isChecked();
   if (scrolling) {
@@ -1086,7 +1098,7 @@ void avsViewer::addBordersForFill(int& width)
     }
     width += add;
     m_noAddBorders = true;
-  } catch (AvisynthError &err) { //catch AvisynthErrors
+  } catch (AvisynthError err) { //catch AvisynthErrors
     std::cerr << qPrintable(tr("Avisynth error: ")) << err.msg << std::endl;
   } catch (...) {
     std::cerr << "AddBorder failed!" << std::endl;
@@ -1132,7 +1144,7 @@ unsigned char* avsViewer::getFrameData(const int& i, const int& count)
       return nullptr;
     }
     return const_cast<unsigned char*>(pvframe->GetReadPtr());
-  } catch (AvisynthError &err) { //catch AvisynthErrors
+  } catch (AvisynthError err) { //catch AvisynthErrors
     std::cerr << "-> " << err.msg << std::endl;
   } catch (...) { //catch everything else
     std::cout << "-> getFrameData - Unknown error (" << count << ")" << std::endl;
@@ -1145,7 +1157,7 @@ unsigned char* avsViewer::getFrameData(const int& i, const int& count)
  **/
 void avsViewer::showFrame(const int& i)
 {
-  if (m_env == nullptr || i > m_frameCount || m_frameCount == 0) {
+  if (m_env == nullptr || m_env == 0 || i > m_frameCount || m_frameCount == 0) {
     return;
   }
   try {
