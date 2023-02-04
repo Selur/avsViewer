@@ -130,10 +130,10 @@ bool avsViewer::initEnv()
       std::cerr << "Could not create IScriptenvironment,..." << std::endl;
       return false;
     } else {
-      std::cerr << "Created script env (classic): " << AVISYNTH_CLASSIC_INTERFACE_VERSION << std::endl;
+      std::cout << "Created script env (classic): " << AVISYNTH_CLASSIC_INTERFACE_VERSION << std::endl;
     }
   } else {
-     std::cerr << "Created script env (current): " << AVISYNTH_INTERFACE_VERSION << std::endl;
+     std::cout << "Created script env (current): " << AVISYNTH_INTERFACE_VERSION << std::endl;
   }
 
   return true;
@@ -516,7 +516,7 @@ void addShowInfoToContent(const int distributorIndex, const bool ffmpegSource,
   } else if (!content.contains(QString("Info("))) {
     newContent = content;
     int index = newContent.lastIndexOf(prefetch);
-    if (index != -1) {
+    if (index != -1 && !ffms2Line.isEmpty()) {
        QString addition = "\n";
        addition += "Import(\"" + ffms2Line + "\")";
        addition += "\n";
