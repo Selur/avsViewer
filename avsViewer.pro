@@ -27,25 +27,34 @@ win32-msvc* {
       CONFIG += c++17 # C++11 support
       QMAKE_CXXFLAGS += /std:c++17
     }
-    QMAKE_LFLAGS += /STACK:64000000
-    QMAKE_CXXFLAGS += -bigobj
 
+    !contains(QMAKE_TARGET.arch, x86_64) {
+      message("x86 build")
+      QMAKE_LFLAGS += /LARGEADDRESSAWARE
+      DEFINES += NOMINMAX
+      CONFIG += precompile_header
+    } else {
+      QMAKE_CFLAGS_RELEASE += -WX
+      QMAKE_CFLAGS_RELEASE_WITH_DEBUGINFO += -WX
+      QMAKE_CFLAGS_RELEASE += -link notelemetry.obj
+
+      # some Windows headers violate strictStrings rules
+      QMAKE_CXXFLAGS_RELEASE -= -Zc:strictStrings
+      QMAKE_CFLAGS_RELEASE -= -Zc:strictStrings
+      QMAKE_CFLAGS -= -Zc:strictStrings
+      QMAKE_CXXFLAGS -= -Zc:strictStrings
+      QMAKE_CXXFLAGS_RELEASE += /Zc:__cplusplus
+      QMAKE_CFLAGS_RELEASE += /Zc:__cplusplus
+      QMAKE_CFLAGS += /Zc:__cplusplus
+      QMAKE_CXXFLAGS += /Zc:__cplusplus
+      QMAKE_LFLAGS += /STACK:64000000
+      QMAKE_CXXFLAGS += -bigobj
+
+    }
+    QMAKE_CXXFLAGS_RELEASE += -MP
     greaterThan(QT_MAJOR_VERSION, 5) {
       QMAKE_LFLAGS += /entry:mainCRTStartup
     }
-    QMAKE_CFLAGS_RELEASE += -WX
-    QMAKE_CFLAGS_RELEASE_WITH_DEBUGINFO += -WX
-    QMAKE_CFLAGS_RELEASE += -link notelemetry.obj
-
-    # some Windows headers violate strictStrings rules
-    QMAKE_CXXFLAGS_RELEASE -= -Zc:strictStrings
-    QMAKE_CFLAGS_RELEASE -= -Zc:strictStrings
-    QMAKE_CFLAGS -= -Zc:strictStrings
-    QMAKE_CXXFLAGS -= -Zc:strictStrings
-    QMAKE_CXXFLAGS_RELEASE += /Zc:__cplusplus
-    QMAKE_CFLAGS_RELEASE += /Zc:__cplusplus
-    QMAKE_CFLAGS += /Zc:__cplusplus
-    QMAKE_CXXFLAGS += /Zc:__cplusplus
 
     greaterThan(QT_MAJOR_VERSION, 4):greaterThan(QT_MINOR_VERSION, 4) { # Qt5.5
       lessThan(QT_MAJOR_VERSION, 6) {
