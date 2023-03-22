@@ -436,7 +436,7 @@ void checkInputType(const QString& content, bool &ffmpegSource, bool &mpeg2sourc
     }
   }
 }
-#include <QMessageBox>
+
 void addShowInfoToContent(const int distributorIndex, const bool ffmpegSource,
     const QString& content, QString &newContent, const QString& ffms2Line,
     bool &invokeFFInfo, const bool mpeg2source, const bool dgnvsource)
@@ -503,7 +503,6 @@ void addShowInfoToContent(const int distributorIndex, const bool ffmpegSource,
     newContent = content;
     newContent = newContent.replace(".dgi\"", ".dgi\", show=true", Qt::CaseInsensitive);
   } else if (distributorIndex != -1) { // contains distributor
-    QMessageBox::warning(nullptr, "Error", QObject::tr("PING 8"));
     if (newContent.contains(QString("Info("))) {
       return;
     }
@@ -627,7 +626,11 @@ void avsViewer::receivedMessage(const QString& message)
   if (message.isEmpty()) {
     return;
   }
-  this->setWindowTitle(message + QString(" (matrix: %1)").arg(m_matrix));
+  if (!m_matrix.isEmpty()) {
+    this->setWindowTitle(message + QString(" (matrix: %1)").arg(m_matrix));
+  } else {
+    this->setWindowTitle(message);
+  }
   QStringList typeAndValue = message.split(SEP1);
   switch (typeAndValue.count())
   {

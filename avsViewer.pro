@@ -2,8 +2,7 @@ QT += core \
     gui \
     network
 CONFIG += qt
-#CONFIG += precompile_header
-#CONFIG += console
+CONFIG += console
 
 UI_DIR = uiHeaders
 TEMPLATE = app

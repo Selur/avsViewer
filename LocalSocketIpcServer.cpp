@@ -24,8 +24,13 @@ LocalSocketIpcServer::LocalSocketIpcServer(const QString& servername, QObject *p
 
 LocalSocketIpcServer::~LocalSocketIpcServer()
 {
+  if (m_server == nullptr) {
+    return;
+  }
   m_server->close();
+  m_server->disconnect();
   m_server->deleteLater();
+  m_server = nullptr;
 }
 
 void currentState(QLocalSocket::LocalSocketState state)
@@ -50,6 +55,10 @@ void LocalSocketIpcServer::socket_new_connection()
   m_clientConnection = m_server->nextPendingConnection();
 #ifdef QT_DEBUG
   currentState(m_clientConnection->state());
+  if (m_clientConnection->state() == QLocalSocket::ConnectedState) {
+    std::cout << "[avsViewer Server]:: incoming connection -> ignored already connected" << std::endl;
+    return;
+  }
 #endif
   connect(m_clientConnection, SIGNAL(disconnected()), this, SLOT(socket_disconnected()));
   connect(m_clientConnection, SIGNAL(readyRead()), this, SLOT(socket_readReady()));
@@ -64,10 +73,12 @@ void LocalSocketIpcServer::socket_disconnected()
   m_clientConnection->deleteLater();
   m_clientConnection = nullptr;
 }
-#include <iostream>
+
+
 void LocalSocketIpcServer::socket_readReady()
 {
   if (m_clientConnection == nullptr) {
+    std::cout << "[avsViewer Server]: no client connection,..." << std::endl;
     return;
   }
 #ifdef QT_DEBUG
@@ -78,7 +89,7 @@ void LocalSocketIpcServer::socket_readReady()
   QDataStream in(m_clientConnection);
   in.setVersion(QDataStream::Qt_5_5);
   try {
-    while (m_clientConnection != nullptr && m_clientConnection->bytesAvailable() >= int(sizeof(quint16))) {
+    while (m_clientConnection != nullptr && m_clientConnection->bytesAvailable() >= qint64(sizeof(quint16))) {
       QByteArray message;
       in >> message;
   #ifdef QT_DEBUG
