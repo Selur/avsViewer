@@ -437,7 +437,7 @@ void checkInputType(const QString& content, bool &ffmpegSource, bool &mpeg2sourc
   }
 }
 
-void addShowInfoToContent(const int distributorIndex, const bool ffmpegSource,
+void addShowInfoToContent(const bool ffmpegSource,
     const QString& content, QString &newContent, const QString& ffms2Line,
     bool &invokeFFInfo, const bool mpeg2source, const bool dgnvsource)
 {
@@ -446,22 +446,7 @@ void addShowInfoToContent(const int distributorIndex, const bool ffmpegSource,
     if (newContent.contains(QString("FFInfo("))) {
       return;
     }
-    if (distributorIndex != -1) { // contains distributor
-      newContent = content;
-      newContent = newContent.remove(distributorIndex, newContent.size()).trimmed();
-      if (!ffms2Line.isEmpty()) {
-        newContent += "\n";
-        newContent += "Import(\"" + ffms2Line + "\")";
-      }
-      newContent += "\n";
-      newContent += "SetMTMode(5)";
-      newContent += "\n";
-      newContent += "FFInfo()";
-      newContent += "\n";
-      newContent += "distributor()";
-      newContent += "\n";
-      newContent += "return last";
-    } else if (!ffms2Line.isEmpty()) {
+    if (!ffms2Line.isEmpty()) {
       newContent = content;
       int index = content.lastIndexOf(prefetch);
       if (index != -1) {
@@ -502,16 +487,6 @@ void addShowInfoToContent(const int distributorIndex, const bool ffmpegSource,
     }
     newContent = content;
     newContent = newContent.replace(".dgi\"", ".dgi\", show=true", Qt::CaseInsensitive);
-  } else if (distributorIndex != -1) { // contains distributor
-    if (newContent.contains(QString("Info("))) {
-      return;
-    }
-    newContent = content;
-    newContent = newContent.remove(distributorIndex, newContent.size()).trimmed();
-    newContent += "\n";
-    newContent += "Info()";
-    newContent += "\n";
-    newContent += "return last";
   } else if (!content.contains(QString("Info("))) {
     newContent = content;
     int index = newContent.lastIndexOf(prefetch);
@@ -568,15 +543,6 @@ void addHistrogramToContent(const QString& content, QString &newContent, const Q
     }
 
   } else {
-    index = newContent.indexOf("distributor()", Qt::CaseInsensitive);
-    if (index != -1) {
-      if (matrix.isEmpty()) {
-        newContent.insert(index, "\nConvertToYV12().ColorYUV(analyze=true)\nHistogram(mode=\"levels\")\n");
-      } else {
-        newContent.insert(index, "\nConvertToYV12(matrix=\""+matrix+"\").ColorYUV(analyze=true)\nHistogram(mode=\"levels\")\n");
-      }
-      return;
-    }
     index = newContent.indexOf("return", Qt::CaseInsensitive);
     if (index != -1) {
       if (matrix.isEmpty()) {
@@ -606,11 +572,11 @@ void avsViewer::applyResolution(const QString& content, QString &newContent, dou
     newContent = content;
   }
   newContent = newContent.trimmed();
-  QString resizer = resize + "Resize(Ceil(last.Width*" + QString::number(mult) + "), last.Height)\n";
-  int index = newContent.indexOf("distributor()", Qt::CaseInsensitive);
-  if (index != -1) { // add before distributor
-    newContent.insert(index, resizer);
-    return;
+  QString resizer;
+  if (!m_inf->IsRGB32()) { // keep mod2 for non RGB
+    resizer = resize + QString("Resize(Ceil(last.Width*%1) - (Ceil(last.Width*%1) % 2), last.Height)\n").arg(mult);
+  } else {
+    resizer = resize + QString("Resize(Ceil(last.Width*%1), last.Height)\n").arg(mult);
   }
   QStringList lines = newContent.split("\n");
   QString lastLine = lines.last().trimmed();
@@ -763,8 +729,7 @@ bool avsViewer::adjustScript(bool& invokeFFInfo)
     ui.infoCheckBox->setEnabled(true);
     showInfo = ui.infoCheckBox->isChecked();
     if (showInfo) {
-      int index = content.indexOf("distributor()", Qt::CaseInsensitive);
-      addShowInfoToContent(index, ffmpegSource, content, newContent, ffms2Line, invokeFFInfo, mpeg2source, dgnvsource);
+      addShowInfoToContent(ffmpegSource, content, newContent, ffms2Line, invokeFFInfo, mpeg2source, dgnvsource);
     }
     if (!m_showOnly && ui.histogramCheckBox->isChecked()) {
       addHistrogramToContent(content, newContent, m_matrix);
@@ -794,12 +759,11 @@ bool avsViewer::invokeFunction(const QString& name)
   try {
     QByteArray ba = name.toLocal8Bit();
     const char *function = ba.data();
-    std::cerr << "invoking " << function << std::endl;
+    std::cout << "invoking " << function << std::endl;
     if (!m_env->FunctionExists(function)) {
        m_env->ThrowError(ba + " does not exist!");
     }
     m_res = m_env->Invoke(function, AVSValue(&m_res, 1)); //import current input to environment
-    std::cerr << "invoked " << function << std::endl;
     return true;
   } catch (AvisynthError err) { //catch AvisynthErrors
     std::cerr << "Avisynth error " << qPrintable(m_currentInput) << ": " << std::endl << err.msg << std::endl;
