@@ -6,13 +6,19 @@ CONFIG += console
 
 UI_DIR = uiHeaders
 TEMPLATE = app
-contains(QMAKE_TARGET.arch, x86_64) {
-  message("64bit build")
+win32* {
+    contains(QMAKE_TARGET.arch, x86_64) {
+      message("64bit build")
+      CODECFORSRC = UTF-8
+      CODECFORTR = UTF-8
+      TARGET = avsViewer64
+    } else {
+      message("32bit build")
+      TARGET = avsViewer
+    }
+} else {
   CODECFORSRC = UTF-8
   CODECFORTR = UTF-8
-  TARGET = avsViewer64
-} else {
-  message("32bit build")
   TARGET = avsViewer
 }
 
@@ -87,5 +93,9 @@ SOURCES += LocalSocketIpcServer.cpp \
 FORMS += viewer.ui
 RESOURCES +=
 
-
-INCLUDEPATH += "C:\Program Files (x86)\AviSynth+\FilterSDK\include"
+win32* {
+    INCLUDEPATH += "C:\Program Files (x86)\AviSynth+\FilterSDK\include"
+} else {
+    INCLUDEPATH += "/usr/include/avisynth"
+    INCLUDEPATH += "/usr/local/include/avisynth"
+}

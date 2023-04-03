@@ -1,5 +1,14 @@
 #include "avsViewer.h"
-#include <conio.h>
+#ifdef _WIN32
+    #include <conio.h>
+    #define AVISYNTH_LIB "AviSynth.dll"
+#else
+    #ifdef __APPLE__
+        #define AVISYNTH_LIB "libavisynth.dylib"
+    #else
+        #define AVISYNTH_LIB "libavisynth.so"
+    #endif
+#endif
 #include <QFile>
 #include <QPixmap>
 #include <iostream>
@@ -50,9 +59,9 @@ avsViewer::avsViewer(QWidget *parent, const QString& path, const double& mult, c
   m_desktopHeight = height;
   std::cout << "-> using desktop resolution: " << m_desktopWidth << "x" << m_desktopHeight << std::endl;
   ui.scrollArea->setWidget(m_showLabel);
-  QString avisynthDll = QDir::toNativeSeparators(qApp->applicationDirPath() + QDir::separator() + QString("AviSynth.dll"));
+  QString avisynthDll = QDir::toNativeSeparators(qApp->applicationDirPath() + QDir::separator() + QString(AVISYNTH_LIB));
   if (!QFile::exists(avisynthDll)) {
-    avisynthDll = QString("AviSynth.dll");
+    avisynthDll = QString(AVISYNTH_LIB);
   }
   m_avsDLL.setFileName(avisynthDll);
   if (m_currentInput.isEmpty()) {
@@ -98,10 +107,10 @@ bool avsViewer::loadAvisynthDLL()
   if (!m_avsDLL.load()) {
     QString error = m_avsDLL.errorString();
     if (!error.isEmpty()) {
-      std::cerr << "Could not load avisynth.dll! " << std::endl << qPrintable(error) << std::endl;
+      std::cerr << "Could not load " AVISYNTH_LIB "! " << std::endl << qPrintable(error) << std::endl;
       return false;
     }
-    std::cerr << "Could not load avisynth.dll!" << std::endl;
+    std::cerr << "Could not load " AVISYNTH_LIB "!" << std::endl;
     return false;
   }
   std::cout << "loaded avisynth dll,..(" << qPrintable(m_avsDLL.fileName()) << ")" << std::endl;
