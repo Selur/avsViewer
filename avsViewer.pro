@@ -39,10 +39,10 @@ win32-msvc* {
       CONFIG += c++17 # C++11 support
       QMAKE_CXXFLAGS += /std:c++17
     }
-
     !contains(QMAKE_TARGET.arch, x86_64) {
-      QMAKE_LFLAGS += /LARGEADDRESSAWARE
       DEFINES += NOMINMAX
+      DEFINES += "LARGEADDRESSAWARE"
+      QMAKE_LFLAGS += /LARGEADDRESSAWARE
       # some Windows headers violate strictStrings rules
       QMAKE_CXXFLAGS_RELEASE -= -Zc:strictStrings
       QMAKE_CFLAGS_RELEASE -= -Zc:strictStrings

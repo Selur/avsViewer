@@ -55,7 +55,7 @@
         <x>0</x>
         <y>0</y>
         <width>1513</width>
-        <height>718</height>
+        <height>716</height>
        </rect>
       </property>
       <property name="sizePolicy">
@@ -441,15 +441,52 @@ p, li { white-space: pre-wrap; }
       </widget>
      </item>
      <item>
-      <widget class="QCheckBox" name="scrollingCheckBox">
+      <widget class="QComboBox" name="zoomHandlingComboBox">
        <property name="sizePolicy">
         <sizepolicy hsizetype="Fixed" vsizetype="Fixed">
          <horstretch>0</horstretch>
          <verstretch>0</verstretch>
         </sizepolicy>
        </property>
-       <property name="text">
-        <string>scrolling</string>
+       <item>
+        <property name="text">
+         <string>Fit to frame</string>
+        </property>
+       </item>
+       <item>
+        <property name="text">
+         <string>No zoom</string>
+        </property>
+       </item>
+       <item>
+        <property name="text">
+         <string>Fixed zoom</string>
+        </property>
+       </item>
+      </widget>
+     </item>
+     <item>
+      <widget class="QDoubleSpinBox" name="zoomScaleDoubleSpinBox">
+       <property name="enabled">
+        <bool>false</bool>
+       </property>
+       <property name="sizePolicy">
+        <sizepolicy hsizetype="Fixed" vsizetype="Fixed">
+         <horstretch>0</horstretch>
+         <verstretch>0</verstretch>
+        </sizepolicy>
+       </property>
+       <property name="alignment">
+        <set>Qt::AlignRight|Qt::AlignTrailing|Qt::AlignVCenter</set>
+       </property>
+       <property name="minimum">
+        <double>1.000000000000000</double>
+       </property>
+       <property name="maximum">
+        <double>100.000000000000000</double>
+       </property>
+       <property name="value">
+        <double>1.000000000000000</double>
        </property>
       </widget>
      </item>

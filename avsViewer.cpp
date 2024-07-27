@@ -72,19 +72,30 @@ avsViewer::avsViewer(QWidget *parent, const QString& path, const double& mult, c
   m_showOnly = true;
   this->init(0);
 }
-
-void avsViewer::wheelEvent(QWheelEvent *event)
+void avsViewer::wheelEvent(QWheelEvent* event)
 {
   double movedby = event->angleDelta().y();
   if (movedby != 0.0) {
-    int numSteps = int (movedby / 120 + m_current);
-    if (numSteps < 0) {
-      numSteps = 0;
+    // Prüfen, ob STRG gedrückt wird
+    if (event->modifiers() & Qt::ControlModifier) {
+      // Wert der zoomScaleDoubleSpinBox anpassen
+      double newZoom = ui.zoomScaleDoubleSpinBox->value();
+      newZoom = newZoom + movedby * 0.001;
+      newZoom = qMax(1.0, newZoom);
+      newZoom = qMin(100.0, newZoom);
+      ui.zoomScaleDoubleSpinBox->setValue(newZoom);
     }
-    if (numSteps >= m_frameCount) {
-      numSteps = m_frameCount - 1;
+    else {
+      // Slider-Position anpassen
+      int numSteps = int(movedby / 120 + m_current);
+      if (numSteps < 0) {
+        numSteps = 0;
+      }
+      if (numSteps >= m_frameCount) {
+        numSteps = m_frameCount - 1;
+      }
+      ui.frameHorizontalSlider->setSliderPosition(numSteps);
     }
-    ui.frameHorizontalSlider->setSliderPosition(numSteps);
     event->accept();
   }
 }
@@ -332,11 +343,16 @@ void avsViewer::on_histogramCheckBox_toggled()
   }
   this->refresh();
 }
-
-
-void avsViewer::on_scrollingCheckBox_toggled()
+void avsViewer::on_zoomScaleDoubleSpinBox_valueChanged(const double& value)
 {
-  this->refresh();
+  Q_UNUSED(value)
+  if (ui.zoomHandlingComboBox->currentText() == "Fixed zoom") this->showFrame(m_current);
+}
+
+void avsViewer::on_zoomHandlingComboBox_currentTextChanged(const QString& value)
+{
+  ui.zoomScaleDoubleSpinBox->setEnabled(value == "Fixed zoom");
+  this->showFrame(m_current);
 }
 
 void avsViewer::on_aspectRatioAdjustmentComboBox_currentTextChanged(const QString& value)
@@ -641,7 +657,7 @@ QString avsViewer::getCurrentInput(const QString& script)
 void avsViewer::changeTo(const QString& input, const QString& value)
 {
   int currentPosition = 0;
-  bool scrolling = ui.scrollingCheckBox->isChecked();
+  bool scrolling = ui.zoomHandlingComboBox->currentText() != "Fit to frame";
   int hPos, vPos;
   bool hVisible = false, vVisible = false;
   int hMax = 0, vMax = 0;
@@ -676,7 +692,6 @@ void avsViewer::changeTo(const QString& input, const QString& value)
   m_providedInput = value;
   this->init(currentPosition);
   if (scrolling) {
-
     ui.scrollArea->horizontalScrollBar()->setVisible(hVisible);
     if (hVisible) {
       ui.scrollArea->horizontalScrollBar()->setMaximum(hMax);
@@ -843,7 +858,8 @@ int avsViewer::init(int start)
     return -6;
   }
   this->showVideoInfo();
-  bool scrolling = ui.scrollingCheckBox->isChecked();
+  QString zoom = ui.zoomHandlingComboBox->currentText();
+  bool scrolling = zoom != "Fit to frame";
   if (scrolling) {
     ui.scrollArea->setHorizontalScrollBarPolicy( Qt::ScrollBarAsNeeded );
     ui.scrollArea->setVerticalScrollBarPolicy( Qt::ScrollBarAsNeeded );
@@ -1155,6 +1171,11 @@ void avsViewer::showFrame(const int& i)
     }
     QImage image(data, width, height, QImage::Format_RGB32); //create a QImage
     this->cropForFill(image, width, height);
+    double zoom = ui.zoomScaleDoubleSpinBox->value();
+    QString zoomHandling = ui.zoomHandlingComboBox->currentText();
+    if (zoomHandling == "Fixed zoom" && zoom > 1) {
+      m_zoom = zoom;
+    }
     m_showLabel->setText(QString());
     m_currentImage = image.mirrored(); // flip image otherwise it's upside down
     QPixmap map;
@@ -1162,12 +1183,14 @@ void avsViewer::showFrame(const int& i)
       std::cerr << " couldn't convert image data to pixmap,.. (" << i << ")" << std::endl;
       return;
     }
-    m_showLabel->setPixmap(map);
-    if (!ui.scrollingCheckBox->isChecked()) {
+    if (zoomHandling != "Fixed zoom") {
       m_showLabel->setPixmap(map.scaled(this->width()-8, this->height()-40, Qt::KeepAspectRatio, Qt::SmoothTransformation));
-    } else if (m_zoom != 1.0) {
-      m_showLabel->setPixmap(map.scaled(int (width*m_zoom+0.5), int (height*m_zoom+0.5), Qt::KeepAspectRatio, Qt::SmoothTransformation));
-    } else {
+    }
+    else if (m_zoom != 1.0) {
+      m_showLabel->setPixmap(
+        map.scaled(int(width * m_zoom + 0.5), int(height * m_zoom + 0.5), Qt::KeepAspectRatio, Qt::FastTransformation));
+    }
+    else {
       m_showLabel->setPixmap(map);
     }
     m_currentFrameWidth = m_showLabel->width();
