@@ -23,6 +23,7 @@
 #include <QListWidgetItem>
 #include "LocalSocketIpcServer.h"
 #include "LocalSocketIpcClient.h"
+#include <QEvent>
 #include <QWheelEvent>
 #include <QFile>
 #include <QScrollBar>
@@ -33,12 +34,12 @@ const AVS_Linkage *AVS_linkage = 0;
 
 avsViewer::avsViewer(QWidget *parent, const QString& path, const double& mult, const QString& ipcID, const QString& matrix)
     : QWidget(parent), ui(), m_frameCount(100), m_current(-1),
-        m_currentInput(path), m_version(QString()), m_avsModified(QString()),
+        m_currentInput(path), m_avsModified(QString()), m_lastError(QString()),
         m_inputPath(QString()), m_res(0), m_mult(mult), m_currentImage(),
         m_dualView(false), m_desktopWidth(1920), m_desktopHeight(1080),
         m_ipcID(ipcID), m_currentScriptContent(QString()), m_ipcServer(nullptr), m_ipcClient(nullptr),
         m_matrix(matrix), m_showLabel(new QLabel()), m_zoom(1),
-        m_currentFrameWidth(0), m_currentFrameHeight(0), m_fill(0), m_noAddBorders(false), m_env(nullptr),
+        m_currentFrameWidth(0), m_currentFrameHeight(0), m_env(nullptr),
         m_inf(nullptr), m_providedInput(path), m_avsDLL(this), m_showOnly(false)
 {
   ui.setupUi(this);
@@ -59,6 +60,8 @@ avsViewer::avsViewer(QWidget *parent, const QString& path, const double& mult, c
   m_desktopHeight = height;
   std::cout << "-> using desktop resolution: " << m_desktopWidth << "x" << m_desktopHeight << std::endl;
   ui.scrollArea->setWidget(m_showLabel);
+  m_showLabel->installEventFilter(this); // see eventFilter(): click the image, focus the slider
+  ui.scrollArea->viewport()->installEventFilter(this);
   QString avisynthDll = QDir::toNativeSeparators(qApp->applicationDirPath() + QDir::separator() + QString(AVISYNTH_LIB));
   if (!QFile::exists(avisynthDll)) {
     avisynthDll = QString(AVISYNTH_LIB);
@@ -70,8 +73,49 @@ avsViewer::avsViewer(QWidget *parent, const QString& path, const double& mult, c
   delete ui.openAvsPushButton;
   delete ui.histogramCheckBox;
   m_showOnly = true;
-  this->init(0);
+  this->reportInitError(this->init(0));
 }
+
+// show a failed init() in the window instead of only on stderr
+void avsViewer::reportInitError(int code)
+{
+  if (code == 0) {
+    return;
+  }
+  QString reason;
+  switch (code) {
+    case -1  : reason = tr("No input script was given."); break;
+    case -2  : reason = tr("A script environment is still open."); break;
+    case -3  : reason = tr("Could not load Avisynth or create a script environment."); break;
+    case -4  : reason = tr("Could not read the script."); break;
+    case -5  : reason = tr("Avisynth could not import the script."); break;
+    case -6  :
+    case -11 : reason = tr("The script has no video stream."); break;
+    case -9  : reason = tr("Could not convert the clip to RGB32."); break;
+    case -10 : reason = tr("Could not invoke FFInfo()."); break;
+    default  : reason = tr("Unknown error (%1).").arg(code); break;
+  }
+  QString text = tr("Could not load:") + "\n" + m_providedInput + "\n\n" + reason;
+  if (!m_lastError.isEmpty()) {
+    text += "\n\n" + m_lastError;
+  }
+  m_showLabel->setPixmap(QPixmap());
+  m_showLabel->setAlignment(Qt::AlignCenter);
+  m_showLabel->setWordWrap(true);
+  m_showLabel->setText(text);
+  std::cerr << qPrintable(text) << std::endl;
+}
+// clicking the image focuses the frame slider, so left/right step frames straight away
+bool avsViewer::eventFilter(QObject* watched, QEvent* event)
+{
+  if (event->type() == QEvent::MouseButtonPress
+      && (watched == m_showLabel || watched == ui.scrollArea->viewport())
+      && ui.zoomHandlingComboBox->currentText() != "Fixed zoom") { // there the drag pans instead
+    ui.frameHorizontalSlider->setFocus(Qt::MouseFocusReason);
+  }
+  return QWidget::eventFilter(watched, event); // never consume it, panning still needs the press
+}
+
 void avsViewer::wheelEvent(QWheelEvent* event)
 {
   double movedby = event->angleDelta().y();
@@ -103,9 +147,22 @@ void avsViewer::wheelEvent(QWheelEvent* event)
 avsViewer::~avsViewer()
 {
   std::cout << qPrintable(tr("Closing,...")) << std::endl;
+  // release the environment instead of leaking it; inline, since killEnv() would send IPC during destruction
+  if (m_env != nullptr) {
+    m_res = 0;
+    try {
+      m_env->DeleteScriptEnvironment();
+    } catch (AvisynthError err) {
+      std::cerr << "Failed to delete script environment on close: " << err.msg << std::endl;
+    } catch (...) {
+      std::cerr << "Failed to delete script environment on close,.. (Unknown Error)" << std::endl;
+    }
+    m_env = nullptr;
+    m_inf = nullptr;
+  }
   if (!m_avsModified.isEmpty()) {
-    QFile::remove(m_avsModified);
     std::cout << qPrintable(tr("deleting: %1").arg(m_avsModified)) << std::endl;
+    QFile::remove(m_avsModified);
   }
   std::cout << qPrintable(tr("finished,...")) << std::endl;
 }
@@ -142,6 +199,11 @@ bool avsViewer::initEnv()
   }
   // create new script environment
   IScriptEnvironment* (*CreateScriptEnvironment)(int version) = (IScriptEnvironment*(*)(int)) m_avsDLL.resolve("CreateScriptEnvironment"); //resolve CreateScriptEnvironment from the dll
+  if (CreateScriptEnvironment == nullptr) { // resolve() returns null when the symbol is missing
+    std::cerr << "Could not resolve 'CreateScriptEnvironment' from " << qPrintable(m_avsDLL.fileName())
+              << " - wrong or damaged Avisynth library?" << std::endl;
+    return false;
+  }
   std::cout << "loaded CreateScriptEnvironment definition from dll,.. " << std::endl;
   m_env = CreateScriptEnvironment(AVISYNTH_INTERFACE_VERSION); //create a new IScriptEnvironment
   if (!m_env) { //abort if IScriptEnvironment couldn't be created
@@ -161,10 +223,11 @@ bool avsViewer::initEnv()
 
 bool avsViewer::setRessource()
 {
+  m_lastError.clear();
   try {
     QByteArray ba = m_currentInput.toLocal8Bit();
     const char *infile = ba.data();
-    std::cout << "Importing " << infile << std::endl;
+    std::cerr << "Importing " << infile << std::endl;
     AVS_linkage = m_env->GetAVSLinkage();
     AVSValue filename = infile;
     AVSValue args = AVSValue(&filename, 1);
@@ -182,6 +245,7 @@ bool avsViewer::setRessource()
     }
     return true;
   } catch (AvisynthError err) { //catch AvisynthErrors
+    m_lastError = QString::fromLocal8Bit(err.msg);
     std::cerr << "-> " << err.msg << std::endl;
   } catch( const std::exception & ex ) {
     std::cout << ex.what() << std::endl;
@@ -229,17 +293,7 @@ void avsViewer::on_jumpForwardPushButton_clicked()
   ui.frameHorizontalSlider->setSliderPosition(frame);
 }
 
-QString avsViewer::fillUp(int number)
-{
-  QString frameCount = QString::number(m_frameCount);
-  QString ret = QString::number(number);
-  while (ret.size() < frameCount.size()) {
-    ret = "0" + ret;
-  }
-  return ret;
-}
-
-QString removeLastSeparatorFromPath(QString input)
+static QString removeLastSeparatorFromPath(QString input)
 {
   input = input.trimmed();
   if (input.isEmpty()) {
@@ -255,7 +309,7 @@ QString removeLastSeparatorFromPath(QString input)
   return input.remove(size - 1, 1);
 }
 
-QString getDirectory(const QString& input)
+static QString getDirectory(const QString& input)
 {
   if (input.isEmpty()) {
     return QString();
@@ -289,7 +343,7 @@ void avsViewer::on_saveImagePushButton_clicked()
     return;
   }
   m_inputPath = getDirectory(input);
-  if (!m_currentImage.save(input, "PNG", 100)) {
+  if (!m_currentImage.save(input, "PNG", -1)) { // -1 = default compression; 100 would mean *least* compressed
     QMessageBox::warning(nullptr, "Error", QObject::tr("Couldn't save %1").arg(input));
   }
   this->showFrame(m_current);
@@ -308,9 +362,8 @@ void avsViewer::cleanUp()
       std::cerr << "Failed to delete script environment,.. (Unkown Error)" << std::endl;
     }
     m_env = nullptr; // ensure new environment created next time
+    m_inf = nullptr; // borrowed from the clip we just released, don't keep it around
     m_current = 0;
-    m_fill = 0;
-    m_noAddBorders = false;
     qApp->processEvents();
   }
 }
@@ -320,16 +373,14 @@ void avsViewer::refresh()
   int curr = m_current;
   this->cleanUp();
   m_current = curr;
-  this->init(m_current);
+  // always rewrite from the provided script; re-reading our own _tmp.avs appended the resizer twice
+  m_currentInput = m_providedInput;
+  this->reportInitError(this->init(m_current));
 }
 
 void avsViewer::on_infoCheckBox_toggled()
 {
-  if (!ui.infoCheckBox->isChecked()) {
-    std::cout << "resetting input,.. (info)" << std::endl;
-    m_currentInput = m_providedInput;
-  }
-  this->refresh();
+  this->refresh(); // refresh() resets the input to m_providedInput
 }
 
 void avsViewer::on_histogramCheckBox_toggled()
@@ -337,22 +388,20 @@ void avsViewer::on_histogramCheckBox_toggled()
   if (m_showOnly) {
     return;
   }
-  if (!ui.histogramCheckBox->isChecked()) {
-    std::cout << "resetting input,.. (histogram)" << std::endl;
-    m_currentInput = m_providedInput;
-  }
-  this->refresh();
+  this->refresh(); // refresh() resets the input to m_providedInput
 }
 void avsViewer::on_zoomScaleDoubleSpinBox_valueChanged(const double& value)
 {
   Q_UNUSED(value)
-  if (ui.zoomHandlingComboBox->currentText() == "Fixed zoom") this->showFrame(m_current);
+  if (ui.zoomHandlingComboBox->currentText() == "Fixed zoom") {
+    this->updatePixmap(); // zooming only re-scales, no need to decode again
+  }
 }
 
 void avsViewer::on_zoomHandlingComboBox_currentTextChanged(const QString& value)
 {
   ui.zoomScaleDoubleSpinBox->setEnabled(value == "Fixed zoom");
-  this->showFrame(m_current);
+  this->updatePixmap();
 }
 
 void avsViewer::on_aspectRatioAdjustmentComboBox_currentTextChanged(const QString& value)
@@ -361,12 +410,7 @@ void avsViewer::on_aspectRatioAdjustmentComboBox_currentTextChanged(const QStrin
   this->refresh();
 }
 
-void avsViewer::fromConsoleReader(QString text)
-{
-  std::cout << "From console reader: " << qPrintable(text) << std::endl;
-}
-
-QString removeQuotes(QString input)
+static QString removeQuotes(QString input)
 {
   QString ret = input.trimmed();
   if (ret.startsWith("\"")) {
@@ -378,7 +422,7 @@ QString removeQuotes(QString input)
   return ret;
 }
 
-QString getWholeFileName(const QString& input)
+static QString getWholeFileName(const QString& input)
 {
   if (input.isEmpty()) {
     return QString();
@@ -394,7 +438,7 @@ QString getWholeFileName(const QString& input)
   return QDir::toNativeSeparators(output);
 }
 
-QString getFileName(const QString& input)
+static QString getFileName(const QString& input)
 {
   if (input.isEmpty()) {
     return QString();
@@ -407,14 +451,15 @@ QString getFileName(const QString& input)
   return output;
 }
 
-int saveTextTo(const QString& text, const QString& to)
+static int saveTextTo(const QString& text, const QString& to)
 {
   if (text.isEmpty()) {
     return -1;
   }
   QFile file(to);
   file.remove();
-  if (file.open(QIODevice::WriteOnly | QIODevice::Text)) {
+  // no QIODevice::Text: on Windows it re-translated the CR the content already had, one more per rewrite
+  if (file.open(QIODevice::WriteOnly)) {
     QTextStream out(&file);
 #if (QT_VERSION >= QT_VERSION_CHECK(6,0,0))
   out.setEncoding(QStringConverter::System);
@@ -430,7 +475,7 @@ int saveTextTo(const QString& text, const QString& to)
   return -1;
 }
 
-void checkInputType(const QString& content, bool &ffmpegSource, bool &mpeg2source, bool &dgnvsource, QString &ffms2Line)
+static void checkInputType(const QString& content, bool &ffmpegSource, bool &mpeg2source, bool &dgnvsource, QString &ffms2Line)
 {
   foreach(QString line, content.split("\n"))
   {
@@ -462,13 +507,14 @@ void checkInputType(const QString& content, bool &ffmpegSource, bool &mpeg2sourc
   }
 }
 
-void addShowInfoToContent(const bool ffmpegSource,
-    const QString& content, QString &newContent, const QString& ffms2Line,
+// detectable = content minus comments, used for the "already present?" tests; rewriting still uses content
+static void addShowInfoToContent(const bool ffmpegSource,
+    const QString& content, const QString& detectable, QString &newContent, const QString& ffms2Line,
     bool &invokeFFInfo, const bool mpeg2source, const bool dgnvsource)
 {
   const QString prefetch = QString("PreFetch(");
   if (ffmpegSource) {
-    if (newContent.contains(QString("FFInfo("))) {
+    if (detectable.contains(QString("FFInfo("))) {
       return;
     }
     if (!ffms2Line.isEmpty()) {
@@ -487,10 +533,7 @@ void addShowInfoToContent(const bool ffmpegSource,
       if (index != -1) {
         newContent = newContent.remove(index, newContent.size()).trimmed();
       }
-      if (content.contains("SetModeMT(")) {
-        newContent += "\n";
-        newContent += "SeMTMode(5)";
-      }
+      // a dead "SetModeMT("/"SeMTMode(5)" block was dropped here, not respelled: Avisynth+ has no SetMTMode
       newContent += "\n";
       newContent += "Import(\"" + ffms2Line + "\")";
       newContent += "\n";
@@ -501,18 +544,18 @@ void addShowInfoToContent(const bool ffmpegSource,
       invokeFFInfo = true;
     }
   } else if (mpeg2source) {
-    newContent = content;
-    if (newContent.contains(QString("Info("))) {
+    if (detectable.contains(QString("Info("))) {
       return;
     }
+    newContent = content;
     newContent = newContent.replace(".d2v\"", ".d2v\", info=1", Qt::CaseInsensitive);
   } else if (dgnvsource) {
-    if (newContent.contains(QString("Info("))) {
+    if (detectable.contains(QString("Info("))) {
       return;
     }
     newContent = content;
     newContent = newContent.replace(".dgi\"", ".dgi\", show=true", Qt::CaseInsensitive);
-  } else if (!content.contains(QString("Info("))) {
+  } else if (!detectable.contains(QString("Info("))) {
     newContent = content;
     int index = newContent.lastIndexOf(prefetch);
     if (index != -1 && !ffms2Line.isEmpty()) {
@@ -535,7 +578,7 @@ void addShowInfoToContent(const bool ffmpegSource,
   }
 }
 
-void addHistrogramToContent(const QString& content, QString &newContent, const QString& matrix)
+static void addHistrogramToContent(const QString& content, QString &newContent, const QString& matrix)
 {
   if (newContent.isEmpty()) {
     newContent = content;
@@ -597,12 +640,10 @@ void avsViewer::applyResolution(const QString& content, QString &newContent, dou
     newContent = content;
   }
   newContent = newContent.trimmed();
-  QString resizer;
-  if (!m_inf->IsRGB32()) { // keep mod2 for non RGB
-    resizer = resize + QString("Resize(Ceil(last.Width*%1) - (Ceil(last.Width*%1) % 2), last.Height)\n").arg(mult);
-  } else {
-    resizer = resize + QString("Resize(Ceil(last.Width*%1), last.Height)\n").arg(mult);
-  }
+  // let Avisynth decide mod2 at evaluation time; m_inf is not valid yet this early in init()
+  const QString width = QString("Ceil(last.Width*%1)").arg(mult);
+  const QString target = QString("last.IsRGB32() ? %1 : %1 - (%1 % 2)").arg(width);
+  QString resizer = resize + QString("Resize(%1, last.Height)\n").arg(target);
   QStringList lines = newContent.split("\n");
   QString lastLine = lines.last().trimmed();
   if (lastLine.startsWith("return", Qt::CaseInsensitive)) {
@@ -617,11 +658,7 @@ void avsViewer::receivedMessage(const QString& message)
   if (message.isEmpty()) {
     return;
   }
-  if (!m_matrix.isEmpty()) {
-    this->setWindowTitle(message + QString(" (matrix: %1)").arg(m_matrix));
-  } else {
-    this->setWindowTitle(message);
-  }
+  this->setWindowTitle(message + this->matrixSuffix());
   QStringList typeAndValue = message.split(SEP1);
   switch (typeAndValue.count())
   {
@@ -650,8 +687,11 @@ QString avsViewer::getCurrentInput(const QString& script)
   }
   QString input = script;
   input = input.remove(0, index + element.size());
-  input = input.remove(input.indexOf("\n"), input.size());
-  return input;
+  const int end = input.indexOf("\n");
+  if (end != -1) { // QString::remove() counts a negative position back from the
+    input = input.remove(end, input.size()); // end, so -1 silently ate a character
+  }
+  return input.trimmed(); // drop the '\r' of a CRLF script, and any stray padding
 }
 
 void avsViewer::changeTo(const QString& input, const QString& value)
@@ -690,7 +730,7 @@ void avsViewer::changeTo(const QString& input, const QString& value)
   m_currentInput = value; //set current input
   std::cout << "setting provided input,.. (changeTo)";
   m_providedInput = value;
-  this->init(currentPosition);
+  this->reportInitError(this->init(currentPosition));
   if (scrolling) {
     ui.scrollArea->horizontalScrollBar()->setVisible(hVisible);
     if (hVisible) {
@@ -711,11 +751,16 @@ void avsViewer::changeTo(const QString& input, const QString& value)
 
 void avsViewer::callMethod(const QString& typ, const QString& value, const QString &input)
 {
+  // an .avs may LoadPlugin arbitrary code, so hold IPC commands to the same rule as the Open button
+  if (!value.endsWith(".avs", Qt::CaseInsensitive)) {
+    std::cerr << qPrintable(QString("Change ignored, not an .avs file: '%1'").arg(value)) << std::endl;
+    return;
+  }
   if (!QFile::exists(value)){
     std::cout << qPrintable(QString("Change ignored since '%1' doesn't exist.").arg(value)) << std::endl;
     return;
   }
-  this->setWindowTitle(QString("%1, %2: %3 (matrix: %4)").arg(typ).arg(value).arg(input).arg(m_matrix));
+  this->setWindowTitle(QString("%1, %2: %3").arg(typ).arg(value).arg(input) + this->matrixSuffix());
   if (typ == "changeTo") {
     this->changeTo(input, value);
     return;
@@ -728,6 +773,7 @@ bool avsViewer::adjustScript(bool& invokeFFInfo)
 {
   QString newContent;
   QFile file(m_currentInput);
+
   if (file.open(QIODevice::ReadOnly)) {
     bool ffmpegSource = false;
     bool showInfo = false;
@@ -735,6 +781,7 @@ bool avsViewer::adjustScript(bool& invokeFFInfo)
     bool dgnvsource = false;
     QString content = file.readAll(), ffms2Line;
     QStringList lines = content.split("\n");
+    // detect on the comment-stripped script; this list used to be built and then thrown away
     QStringList nocomments;
     foreach(QString line, lines) {
       line = line.trimmed();
@@ -743,23 +790,24 @@ bool avsViewer::adjustScript(bool& invokeFFInfo)
       }
       nocomments << line;
     }
-    content = lines.join("\n");
+    const QString detectable = nocomments.join("\n");
     if (m_currentScriptContent.isEmpty()) {
       m_currentScriptContent = content;
     }
     file.close();
-    m_dualView = content.contains("SourceFiltered = Source");
-    checkInputType(content, ffmpegSource, mpeg2source, dgnvsource, ffms2Line);
+    m_dualView = detectable.contains("SourceFiltered = Source");
+    checkInputType(detectable, ffmpegSource, mpeg2source, dgnvsource, ffms2Line);
     ui.infoCheckBox->setEnabled(true);
     showInfo = ui.infoCheckBox->isChecked();
     if (showInfo) {
-      addShowInfoToContent(ffmpegSource, content, newContent, ffms2Line, invokeFFInfo, mpeg2source, dgnvsource);
+      addShowInfoToContent(ffmpegSource, content, detectable, newContent, ffms2Line, invokeFFInfo, mpeg2source, dgnvsource);
     }
     if (!m_showOnly && ui.histogramCheckBox->isChecked()) {
       addHistrogramToContent(content, newContent, m_matrix);
     }
     applyResolution(content, newContent, m_mult, ui.aspectRatioAdjustmentComboBox->currentText());
-  } else {
+  }
+  else {
     std::cerr << qPrintable(tr("Couldn't read content of: %1").arg(m_currentInput)) << std::endl;
     return false;
   }
@@ -827,9 +875,7 @@ void avsViewer::sendMessageToSever(const QString& message)
   }
 }
 
-/**
- * initilazing an avisynth environment for the current input file
- **/
+// initilazing an avisynth environment for the current input file
 int avsViewer::init(int start)
 {
   this->initIPC();
@@ -933,11 +979,7 @@ int avsViewer::init(int start)
   return 0;
 }
 
-/**
- * output the current color space
- *
- * @return String representtion of the current color
- */
+// string representation of the current color space
 QString avsViewer::getColor() const
 {
   if (m_inf->IsY8()) {
@@ -973,9 +1015,7 @@ QString avsViewer::getColor() const
   return QString("unknown");
 }
 
-/**
- * Show the characteristics of the video
- */
+// Show the characteristics of the video
 void avsViewer::showVideoInfo()
 {
   std::cout << "Color: " << qPrintable(this->getColor());
@@ -1031,9 +1071,7 @@ void avsViewer::adjustToVideoInfo(const bool& scrolling, const bool& first, int&
   }
 }
 
-/**
- * adjust the size of the label
- **/
+// adjust the size of the label
 void avsViewer::adjustLabelSize(const bool& adjust, const int& width, const int& height)
 {
   if (!adjust) {
@@ -1044,9 +1082,7 @@ void avsViewer::adjustLabelSize(const bool& adjust, const int& width, const int&
 }
 
 
-/**
- * adjust the size of the Window
- **/
+// adjust the size of the Window
 void avsViewer::adjustWindowSize(const bool& adjust, const int& width, const int& height)
 {
   if (!adjust) {
@@ -1062,9 +1098,7 @@ void avsViewer::adjustWindowSize(const bool& adjust, const int& width, const int
 }
 
 
-/**
- * adjusts frame-index and frame to slider position
- **/
+// adjusts frame-index and frame to slider position
 void avsViewer::on_frameHorizontalSlider_valueChanged(int value)
 {
   if (value < 0) {
@@ -1076,143 +1110,117 @@ void avsViewer::on_frameHorizontalSlider_valueChanged(int value)
   }
 }
 
-void avsViewer::addBordersForFill(int& width)
-{
-  if (m_fill == 0 || m_noAddBorders) {
-    return;
-  }
-  int add = 16-m_fill;
-  try {
-    AVSValue args[5] = {m_res.AsClip(), 0, 0, add, 0};
-    m_res = m_env->Invoke("AddBorders", AVSValue(args, 5)).AsClip();
-    if (!this->setVideoInfo()) {
-      return;
-    }
-    width += add;
-    m_noAddBorders = true;
-  } catch (AvisynthError err) { //catch AvisynthErrors
-    std::cerr << qPrintable(tr("Avisynth error: ")) << err.msg << std::endl;
-  } catch (...) {
-    std::cerr << "AddBorder failed!" << std::endl;
-  }
-}
 
-void avsViewer::cropForFill(QImage& image, int& width, const int& height)
-{
-  if (m_fill == 0) {
-    return;
-  }
-  width -= (16-m_fill);
-  image = image.copy(0, 0, width, height);
-  sendMessageToSever(QString(" cropped -> new image resolution: %1x%2").arg(image.width()).arg(image.height()));
-}
-
-void avsViewer::outputResType()
-{
- if (m_res.IsBool()) {
-   std::cerr << "Res is bool" << std::endl;
- }
- if (m_res.IsClip()) {
-   std::cerr << "Res is clip" << std::endl;
- }
- if (m_res.IsArray()) {
-   std::cerr << "Res is array" << std::endl;
- }
- if (m_res.IsFloat()) {
-   std::cerr << "Res is float" << std::endl;
- }
- if (m_res.IsString()) {
-   std::cerr << "Res is string" << std::endl;
- }
-}
-
-unsigned char* avsViewer::getFrameData(const int& i, const int& count)
+// fetch frame i into an owned QImage; all pixel access stays inside, while the refcounted PVideoFrame is still alive
+bool avsViewer::grabFrame(const int& i, QImage& target)
 {
   try {
     PClip clip = m_res.AsClip();    //get clip
-    PVideoFrame pvframe = clip->GetFrame(i, m_env); // get frame number i
-    if (pvframe == nullptr) {
+    PVideoFrame frame = clip->GetFrame(i, m_env); // get frame number i
+    if (!frame) {
       std::cerr << " couldn't show frame (no frame: " << i << ")" << std::endl;
-      return nullptr;
+      return false;
     }
-    return const_cast<unsigned char*>(pvframe->GetReadPtr());
+    const unsigned char* data = frame->GetReadPtr();
+    if (data == nullptr) {
+      std::cerr << " couldn't show frame (no data: " << i << ")" << std::endl;
+      return false;
+    }
+    // rows are padded to an aligned pitch, not packed at width*4, so pass the real pitch
+    QImage wrapped(data, m_inf->width, m_inf->height, frame->GetPitch(), QImage::Format_RGB32);
+    // Avisynth RGB is bottom-up; the flip also allocates, detaching us from the frame (flipped() is Qt 6.9+)
+#if (QT_VERSION >= QT_VERSION_CHECK(6, 9, 0))
+    target = wrapped.flipped();
+#else
+    target = wrapped.mirrored();
+#endif
+    return !target.isNull();
   } catch (AvisynthError err) { //catch AvisynthErrors
     std::cerr << "-> " << err.msg << std::endl;
   } catch (...) { //catch everything else
-    std::cout << "-> getFrameData - Unknown error (" << count << ")" << std::endl;
+    std::cerr << "-> grabFrame - Unknown error (" << i << ")" << std::endl;
   }
-  return nullptr;
+  return false;
 }
 
-/**
- * shows frame number i
- **/
+// decodes frame i and shows it; only this path touches Avisynth, re-scaling goes through updatePixmap()
 void avsViewer::showFrame(const int& i)
 {
-  if (m_env == nullptr || m_env == 0 || i > m_frameCount || m_frameCount == 0) {
+  // i >= m_frameCount: valid indices are 0..m_frameCount-1, the old > let Next run one past the end
+  if (m_env == nullptr || m_inf == nullptr || i < 0 || i >= m_frameCount || m_frameCount == 0) {
     return;
   }
   try {
-    int width = m_inf->width;
-    int height = m_inf->height;
-    if (m_fill == 0) {
-      m_fill = width%16;
-    }
-    this->addBordersForFill(width);
-    int count = 0;
-    unsigned char* data = this->getFrameData(i, count);
-    while (data == nullptr && count < 10) {
-      data = this->getFrameData(i, count);
-      count++;
-    }
-    if (data == nullptr) {
+    if (!this->grabFrame(i, m_currentImage)) { // already flipped and detached
       std::cerr << " could not get PVideoFrame data (" << i << ")" << std::endl;
       return;
     }
-    QImage image(data, width, height, QImage::Format_RGB32); //create a QImage
-    this->cropForFill(image, width, height);
-    double zoom = ui.zoomScaleDoubleSpinBox->value();
-    QString zoomHandling = ui.zoomHandlingComboBox->currentText();
-    if (zoomHandling == "Fixed zoom" && zoom > 1) {
-      m_zoom = zoom;
-    }
-    m_showLabel->setText(QString());
-    m_currentImage = image.mirrored(); // flip image otherwise it's upside down
-    QPixmap map;
-    if (!map.convertFromImage(m_currentImage)) {
-      std::cerr << " couldn't convert image data to pixmap,.. (" << i << ")" << std::endl;
-      return;
-    }
-    if (zoomHandling != "Fixed zoom") {
-      m_showLabel->setPixmap(map.scaled(this->width()-8, this->height()-40, Qt::KeepAspectRatio, Qt::SmoothTransformation));
-    }
-    else if (m_zoom != 1.0) {
-      m_showLabel->setPixmap(
-        map.scaled(int(width * m_zoom + 0.5), int(height * m_zoom + 0.5), Qt::KeepAspectRatio, Qt::FastTransformation));
-    }
-    else {
-      m_showLabel->setPixmap(map);
-    }
-    m_currentFrameWidth = m_showLabel->width();
-    m_currentFrameHeight = m_showLabel->height();
     m_current = i; //set m_current to i
     ui.frameHorizontalSlider->setSliderPosition(m_current); // adjust the slider position
-    QString title = tr("showing frame number: %1 of %2").arg(m_current).arg(m_frameCount); //adjust title bar;
-    if (m_dualView) {
-      if (m_currentScriptContent.contains(QString("Interleave(Source, SourceFiltered)"))) {
-        title += " " + tr("(interleaved, input: %1)").arg(m_currentInput);
-      } else if (m_currentScriptContent.contains(QString("Source, SourceFiltered"))) {
-        title += " " + tr("(left side = original, right side = filtered; input: %1)").arg(m_currentInput);
-      } else if (m_currentScriptContent.contains(QString("SourceFiltered, Source"))) {
-        title += " " + tr("(left side = filtered, right side = original; input: %1)").arg(m_currentInput);
-      } else {
-        title += " " + tr("(input: %1)").arg(m_currentInput);
-      }
-    }
-    this->setWindowTitle(title + QString(" (matrix: %1)").arg(m_matrix));
+    this->updateTitle();
+    this->updatePixmap();
   } catch (...) {
     std::cerr << " couldn't show frame,..." << "(" << i << ")" << std::endl;
   }
+}
+
+// re-scales and re-displays the frame already held in m_currentImage
+void avsViewer::updatePixmap()
+{
+  if (m_currentImage.isNull()) {
+    return;
+  }
+  const int width = m_currentImage.width();
+  const int height = m_currentImage.height();
+  const double zoom = ui.zoomScaleDoubleSpinBox->value();
+  const QString zoomHandling = ui.zoomHandlingComboBox->currentText();
+  if (zoomHandling == "Fixed zoom") {
+    m_zoom = zoom; // assign unconditionally: guarding on 'zoom > 1' meant the
+  }                // factor could never be taken back down to 1.0
+  m_showLabel->setText(QString());
+  QPixmap map;
+  if (!map.convertFromImage(m_currentImage)) {
+    std::cerr << " couldn't convert image data to pixmap,.." << std::endl;
+    return;
+  }
+  if (zoomHandling != "Fixed zoom") {
+    m_showLabel->setPixmap(map.scaled(this->width()-8, this->height()-40, Qt::KeepAspectRatio, Qt::SmoothTransformation));
+  }
+  else if (m_zoom != 1.0) {
+    m_showLabel->setPixmap(
+      map.scaled(int(width * m_zoom + 0.5), int(height * m_zoom + 0.5), Qt::KeepAspectRatio, Qt::FastTransformation));
+  }
+  else {
+    m_showLabel->setPixmap(map);
+  }
+  m_currentFrameWidth = m_showLabel->width();
+  m_currentFrameHeight = m_showLabel->height();
+}
+
+// only show the matrix when one was actually given, not a bare "(matrix: )"
+QString avsViewer::matrixSuffix() const
+{
+  if (m_matrix.isEmpty()) {
+    return QString();
+  }
+  return QString(" (matrix: %1)").arg(m_matrix);
+}
+
+void avsViewer::updateTitle()
+{
+  QString title = tr("showing frame number: %1 of %2").arg(m_current).arg(m_frameCount); //adjust title bar;
+  if (m_dualView) {
+    if (m_currentScriptContent.contains(QString("Interleave(Source, SourceFiltered)"))) {
+      title += " " + tr("(interleaved, input: %1)").arg(m_currentInput);
+    } else if (m_currentScriptContent.contains(QString("Source, SourceFiltered"))) {
+      title += " " + tr("(left side = original, right side = filtered; input: %1)").arg(m_currentInput);
+    } else if (m_currentScriptContent.contains(QString("SourceFiltered, Source"))) {
+      title += " " + tr("(left side = filtered, right side = original; input: %1)").arg(m_currentInput);
+    } else {
+      title += " " + tr("(input: %1)").arg(m_currentInput);
+    }
+  }
+  this->setWindowTitle(title + this->matrixSuffix());
 }
 
 void avsViewer::killEnv()
@@ -1221,6 +1229,7 @@ void avsViewer::killEnv()
   sendMessageToSever(QString("KILL environment"));
   this->cleanUp();
   if (!m_avsModified.isEmpty()) {
+    std::cout << qPrintable(tr("deleting: %1").arg(m_avsModified)) << std::endl;
     QFile::remove(m_avsModified);
     m_avsModified = QString();
   }
@@ -1252,9 +1261,7 @@ void avsViewer::on_jumpToPushButton_clicked()
   this->showFrame(to);
 }
 
-/**
- * allows to select a .avs file, starts the initialization
- **/
+// allows to select a .avs file, starts the initialization
 void avsViewer::on_openAvsPushButton_clicked()
 {
   m_showLabel->setText(tr("Opening new file,.."));
@@ -1270,34 +1277,31 @@ void avsViewer::on_openAvsPushButton_clicked()
   this->killEnv();
 
   m_currentInput = input; //set current input
-  this->init();
+  m_providedInput = input; // refresh() rewrites from this, so it has to follow along
+  this->reportInitError(this->init());
 }
 
-/**
- * refresh frame on resize event
- */
+// refresh frame on resize event
 void avsViewer::resizeEvent(QResizeEvent* event)
 {
    QWidget::resizeEvent(event);
-   if (m_current < 0) {
-     m_current = 0;
-   }
-   this->showFrame(m_current);
+   // only re-scale: showFrame() would re-run the whole filter chain on every resize event
+   this->updatePixmap();
 }
 
-/**
- * shows the next frame
- **/
+// shows the next frame
 void avsViewer::on_nextPushButton_clicked()
 {
   if (m_current < 0) {
     m_current = 0;
   }
-  this->showFrame(m_current + 1); // show next frame
+  int next = m_current + 1;
+  if (next >= m_frameCount) { // clamp like jumpForward does, instead of asking
+    next = m_frameCount - 1;  // for a frame past the end
+  }
+  this->showFrame(next); // show next frame
 }
-/**
- * shows the previous frame
- **/
+// shows the previous frame
 void avsViewer::on_previousPushButton_clicked()
 {
   if (m_current < 1) {
@@ -1305,9 +1309,7 @@ void avsViewer::on_previousPushButton_clicked()
   }
   this->showFrame(m_current - 1); // show previous frame
 }
-/**
- * shows the frame of the index where the slider was released
- **/
+// shows the frame of the index where the slider was released
 void avsViewer::on_frameHorizontalSlider_sliderReleased()
 {
   this->showFrame(ui.frameHorizontalSlider->sliderPosition()); // show frame for current slider position

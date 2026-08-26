@@ -12,7 +12,3 @@ MoveScrollArea::MoveScrollArea(QWidget* parent) :
   this->widget()->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
   QScroller::grabGesture(this->viewport(), QScroller::LeftMouseButtonGesture);
 }
-
-void MoveScrollArea::setLayout(QLayout* l) {
-  widget()->setLayout(l);
-}

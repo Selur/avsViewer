@@ -21,6 +21,10 @@ MarkSlider::~MarkSlider()
 void MarkSlider::paintEvent(QPaintEvent *event)
 {
   QSlider::paintEvent(event);
+  // every overlay below divides by maximum(), which is 0 for a single frame clip
+  if (this->maximum() <= this->minimum()) {
+    return;
+  }
   if (m_start == 0 && m_end == 0) {
     return;
   }

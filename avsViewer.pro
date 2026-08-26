@@ -19,26 +19,16 @@ win32* {
 } else {
   CODECFORSRC = UTF-8
   CODECFORTR = UTF-8
-  TARGET = avsViewer
+  TARGET = avsViewer64
 }
 
-# Qt 5+ adjustments
-greaterThan(QT_MAJOR_VERSION, 4) { # QT5+
-  QT += widgets # for all widgets
-  lessThan(QT_MAJOR_VERSION, 6) {
-    QT += multimedia # for QSound
-  }
-  greaterThan(QT_MAJOR_VERSION, 5):greaterThan(QT_MINOR_VERSION, 1) { # QT6.2+
-    QT += multimedia
-  }
-}
+QT += widgets # for all widgets
 
 win32-msvc* {
     message(Building for Windows using Qt $$QT_VERSION)
-    greaterThan(QT_MAJOR_VERSION, 5) {
-      CONFIG += c++17 # C++11 support
-      QMAKE_CXXFLAGS += /std:c++17
-    }
+    CONFIG += c++17 # C++11 support
+     QMAKE_CXXFLAGS += /std:c++17
+
     !contains(QMAKE_TARGET.arch, x86_64) {
       DEFINES += NOMINMAX
       DEFINES += "LARGEADDRESSAWARE"
@@ -60,24 +50,12 @@ win32-msvc* {
     QMAKE_CFLAGS_RELEASE_WITH_DEBUGINFO += -WX
     QMAKE_CFLAGS_RELEASE += -link notelemetry.obj
 
-
-
     QMAKE_CXXFLAGS += -bigobj
     QMAKE_CXXFLAGS_RELEASE += -MP
-    greaterThan(QT_MAJOR_VERSION, 5) {
-      QMAKE_LFLAGS += /entry:mainCRTStartup
-    }
+    QMAKE_LFLAGS += /entry:mainCRTStartup
 
-    greaterThan(QT_MAJOR_VERSION, 4):greaterThan(QT_MINOR_VERSION, 4) { # Qt5.5
-      lessThan(QT_MAJOR_VERSION, 6) {
-        QT += winextras
-      }
-      DEFINES += NOMINMAX
-    }
-
+    DEFINES += NOMINMAX
 }
-
-
 
 HEADERS += LocalSocketIpcServer.h \
     LocalSocketIpcClient.h \

@@ -27,7 +27,8 @@ class avsViewer : public QWidget
   private:
     Ui::avsViewerClass ui;
     int m_frameCount, m_current;
-    QString m_currentInput, m_version, m_avsModified, m_inputPath;
+    QString m_currentInput, m_avsModified, m_inputPath;
+    QString m_lastError; // last Avisynth error text, shown by reportInitError()
     AVSValue m_res;
     double m_mult;
     QImage m_currentImage;
@@ -41,14 +42,16 @@ class avsViewer : public QWidget
     double m_zoom;
     int m_currentFrameWidth;
     int m_currentFrameHeight;
-    int m_fill;
-    bool m_noAddBorders;
     IScriptEnvironment* m_env;
     const VideoInfo* m_inf;
     QString m_providedInput;
     QLibrary m_avsDLL;
     bool m_showOnly;
     void showFrame(const int &i);
+    void updatePixmap(); // re-scale and re-display m_currentImage, no decoding
+    void updateTitle();
+    QString matrixSuffix() const;
+    void reportInitError(int code);
     int init(int start = 0);
     bool initEnv();
 
@@ -58,11 +61,8 @@ class avsViewer : public QWidget
     QString getColor() const;
     bool adjustScript(bool &invokeFFInfo);
     void killEnv();
-    QString fillUp(int number);
     void callMethod(const QString& typ, const QString& value, const QString &input);
     void cleanUp();
-    void addBordersForFill(int &width);
-    void cropForFill(QImage& image, int &width, const int &height);
     void refresh();
     void changeTo(const QString& input, const QString& value);
     void adjustWindowSize(const bool& adjust, const int& width, const int& height);
@@ -72,10 +72,15 @@ class avsViewer : public QWidget
     void initIPC();
     void sendMessageToSever(const QString& message);
     QString getCurrentInput(const QString& script);
-    unsigned char *getFrameData(const int &i, const int &count);
-    void outputResType();
+    bool grabFrame(const int &i, QImage &target);
     void applyResolution(const QString& content, QString &newContent, double mult, const QString& resize);
     bool loadAvisynthDLL();
+
+  protected:
+    // event overrides, not slots; override keeps them bound if Qt changes a signature
+    void wheelEvent(QWheelEvent *event) override;
+    void resizeEvent(QResizeEvent* event) override;
+    bool eventFilter(QObject *watched, QEvent *event) override;
 
   private slots:
     void on_frameHorizontalSlider_valueChanged(int value);
@@ -87,12 +92,9 @@ class avsViewer : public QWidget
     void on_histogramCheckBox_toggled();
     void on_saveImagePushButton_clicked();
     void on_aspectRatioAdjustmentComboBox_currentTextChanged(const QString &value);
-    void fromConsoleReader(QString text);
     void receivedMessage(const QString& message);
     void on_jumpBackwardPushButton_clicked();
     void on_jumpForwardPushButton_clicked();
-    void wheelEvent(QWheelEvent *event);
-    void resizeEvent(QResizeEvent* event);
     void on_jumpToPushButton_clicked();
     void on_jumpToStartPushButton_clicked();
     void on_jumpToEndPushButton_clicked();

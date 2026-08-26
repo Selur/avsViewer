@@ -52,14 +52,20 @@ void LocalSocketIpcServer::socket_new_connection()
   std::cout << "[avsViewer Server]:: incoming connection" << std::endl;
 #endif
 
-  m_clientConnection = m_server->nextPendingConnection();
-#ifdef QT_DEBUG
-  currentState(m_clientConnection->state());
-  if (m_clientConnection->state() == QLocalSocket::ConnectedState) {
-    std::cout << "[avsViewer Server]:: incoming connection -> ignored already connected" << std::endl;
+  QLocalSocket* incoming = m_server->nextPendingConnection();
+  if (incoming == nullptr) {
     return;
   }
+#ifdef QT_DEBUG
+  currentState(incoming->state());
 #endif
+  // newest connection wins; the old code tested the incoming socket (always connected), so QT_DEBUG dropped every command
+  if (m_clientConnection != nullptr) {
+    m_clientConnection->disconnect(this); // don't let close() re-enter socket_disconnected()
+    m_clientConnection->close();
+    m_clientConnection->deleteLater();
+  }
+  m_clientConnection = incoming;
   connect(m_clientConnection, SIGNAL(disconnected()), this, SLOT(socket_disconnected()));
   connect(m_clientConnection, SIGNAL(readyRead()), this, SLOT(socket_readReady()));
 }
@@ -88,19 +94,20 @@ void LocalSocketIpcServer::socket_readReady()
 #endif
   QDataStream in(m_clientConnection);
   in.setVersion(QDataStream::Qt_5_5);
-  try {
-    while (m_clientConnection != nullptr && m_clientConnection->bytesAvailable() >= qint64(sizeof(quint16))) {
-      QByteArray message;
-      in >> message;
-  #ifdef QT_DEBUG
-      std::cout << "[avsViewer Server]: Message received:" << qPrintable(message) << std::endl;
-  #endif
-      emit messageReceived(QString::fromUtf8(message));
+  // a transaction rolls the read back until a whole message arrived; a split one used to decode as empty
+  forever {
+    in.startTransaction();
+    QByteArray message;
+    in >> message;
+    if (!in.commitTransaction()) {
+      return; // incomplete - wait for the rest to turn up
     }
-  } catch (...) {
 #ifdef QT_DEBUG
-    std::cout << "[avsViewer Server]: Problem with client connection,..." << std::endl;
-    m_clientConnection = nullptr;
+    std::cout << "[avsViewer Server]: Message received:" << qPrintable(message) << std::endl;
 #endif
+    emit messageReceived(QString::fromUtf8(message));
+    if (m_clientConnection == nullptr) {
+      return; // a slot closed the connection underneath us
+    }
   }
 }

@@ -8,10 +8,11 @@
 #include "LocalSocketIpcClient.h"
 #include <iostream>
 #include <QDataStream>
+#include <QDateTime>
 
 
 LocalSocketIpcClient::LocalSocketIpcClient(const QString& remoteServername, QObject *parent)
-    : QObject(parent), m_blockSize(0)
+    : QObject(parent), m_blockSize(0), m_lastConnectAttemptMs(-1)
 {
   m_socket = new QLocalSocket(this);
   m_serverName = remoteServername;
@@ -34,32 +35,62 @@ LocalSocketIpcClient::~LocalSocketIpcClient()
   m_socket = nullptr;
 }
 
+// status messages are advisory - never let an absent peer grow the queue forever
+static const int MAX_PENDING_MESSAGES = 100;
+// don't re-attempt a failed connect on every single message
+static const qint64 CONNECT_RETRY_INTERVAL_MS = 5000;
+
 void LocalSocketIpcClient::send_MessageToServer(QString message)
 {
-  m_message = message;
-  std::cout << "[avsViewer Client]: setting message " << qPrintable(m_message) << std::endl;
-  if (m_socket->state() != QLocalSocket::ConnectedState) {
-    m_socket->connectToServer(m_serverName);
-    m_socket->waitForConnected();
+  m_pending.append(message);
+  while (m_pending.size() > MAX_PENDING_MESSAGES) {
+    m_pending.removeFirst();
   }
-  this->socket_connected();
+  if (m_socket->state() == QLocalSocket::ConnectedState) {
+    this->flushPending();
+    return;
+  }
+  this->tryConnect();
+}
+
+// connect at most once every CONNECT_RETRY_INTERVAL_MS; connectToServer() itself blocks on a busy pipe
+void LocalSocketIpcClient::tryConnect()
+{
+  if (m_socket->state() != QLocalSocket::UnconnectedState) {
+    return; // already connecting, nothing to do but wait
+  }
+  const qint64 now = QDateTime::currentMSecsSinceEpoch();
+  if (m_lastConnectAttemptMs >= 0 && (now - m_lastConnectAttemptMs) < CONNECT_RETRY_INTERVAL_MS) {
+    return; // a recent attempt failed, keep queueing instead of blocking again
+  }
+  m_lastConnectAttemptMs = now;
+  m_socket->connectToServer(m_serverName);
+}
+
+void LocalSocketIpcClient::flushPending()
+{
+  if (m_socket->state() != QLocalSocket::ConnectedState) {
+    return;
+  }
+  while (!m_pending.isEmpty()) {
+    const QString message = m_pending.takeFirst();
+    std::cout << "[avsViewer Client]: sending message " << qPrintable(message) << std::endl;
+    QByteArray block;
+    QDataStream out(&block, QIODevice::WriteOnly);
+    out.setVersion(QDataStream::Qt_5_5);
+    out << message.toUtf8();
+    m_socket->write(block);
+  }
+  m_socket->flush();
 }
 
 void LocalSocketIpcClient::socket_connected()
 {
-  if (m_message.isEmpty()) {
+  if (m_pending.isEmpty()) {
     std::cout << "[avsViewer Client]: connected, nothing to send,.." << std::endl;
     return;
   }
-  std::cout << "[avsViewer Client]: sending message " << qPrintable(m_message) << std::endl;
-  QByteArray block;
-  QDataStream out(&block, QIODevice::WriteOnly);
-  out.setVersion(QDataStream::Qt_5_5);
-  out << m_message.toUtf8();
-  out.device()->seek(0);
-  m_message = QString();
-  m_socket->write(block);
-  m_socket->flush();
+  this->flushPending();
 }
 
 void LocalSocketIpcClient::socket_disconnected()
