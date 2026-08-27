@@ -1,0 +1,24 @@
+# review notes, kept local on purpose - see docs/README.md
+/docs
+
+# qmake / build output
+Makefile
+Makefile.Debug
+Makefile.Release
+.qmake.stash
+debug/
+release/
+uiHeaders/
+object_script.*
+*.o
+*.obj
+
+# Qt Creator
+*.pro.user
+*.pro.user.*
+.qtcreator/
+
+# Binaries
+*.exe
+*.pdb
+*.ilk
