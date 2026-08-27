@@ -23,6 +23,7 @@
 #include <QListWidgetItem>
 #include "LocalSocketIpcServer.h"
 #include "LocalSocketIpcClient.h"
+#include <QThread>
 #include <QEvent>
 #include <QWheelEvent>
 #include <QFile>
@@ -38,6 +39,7 @@ avsViewer::avsViewer(QWidget *parent, const QString& path, const double& mult, c
         m_inputPath(QString()), m_res(0), m_mult(mult), m_currentImage(),
         m_dualView(false), m_desktopWidth(1920), m_desktopHeight(1080),
         m_ipcID(ipcID), m_currentScriptContent(QString()), m_ipcServer(nullptr), m_ipcClient(nullptr),
+        m_ipcClientThread(nullptr),
         m_matrix(matrix), m_showLabel(new QLabel()), m_zoom(1),
         m_currentFrameWidth(0), m_currentFrameHeight(0), m_env(nullptr),
         m_inf(nullptr), m_providedInput(path), m_avsDLL(this), m_showOnly(false)
@@ -147,6 +149,15 @@ void avsViewer::wheelEvent(QWheelEvent* event)
 avsViewer::~avsViewer()
 {
   std::cout << qPrintable(tr("Closing,...")) << std::endl;
+  // stop the client thread first: it deletes the client, so m_ipcClient dangles after this
+  if (m_ipcClientThread != nullptr) {
+    m_ipcClientThread->quit();
+    if (!m_ipcClientThread->wait(5000)) {
+      m_ipcClientThread->terminate();
+      m_ipcClientThread->wait(1000);
+    }
+    m_ipcClient = nullptr;
+  }
   // release the environment instead of leaking it; inline, since killEnv() would send IPC during destruction
   if (m_env != nullptr) {
     m_res = 0;
@@ -858,7 +869,14 @@ void avsViewer::initIPC()
     started = true;
   }
   if (m_ipcClient == nullptr) {
-    m_ipcClient = new LocalSocketIpcClient(m_ipcID + "HYBRID", this);
+    // own thread: connectToServer() blocks for seconds on a busy pipe. No parent - moveToThread() refuses one
+    m_ipcClientThread = new QThread(this);
+    m_ipcClientThread->setObjectName("ipc-client");
+    m_ipcClient = new LocalSocketIpcClient(m_ipcID + "HYBRID", nullptr);
+    m_ipcClient->moveToThread(m_ipcClientThread);
+    // destroy the client on its own thread, where its socket lives
+    connect(m_ipcClientThread, &QThread::finished, m_ipcClient, &QObject::deleteLater);
+    m_ipcClientThread->start();
     started = true;
   }
   if (started) {
@@ -871,7 +889,9 @@ void avsViewer::sendMessageToSever(const QString& message)
   std::cout << qPrintable(message) << std::endl;
   this->initIPC();
   if (m_ipcClient != nullptr) {
-    m_ipcClient->send_MessageToServer(message);
+    // queued, never direct: the client is on another thread and may be blocked in connect
+    QMetaObject::invokeMethod(m_ipcClient, "send_MessageToServer", Qt::QueuedConnection,
+                              Q_ARG(QString, message));
   }
 }
 

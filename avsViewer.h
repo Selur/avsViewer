@@ -16,6 +16,7 @@
 class LocalSocketIpcServer;
 class LocalSocketIpcClient;
 class QResizeEvent;
+class QThread;
 
 class avsViewer : public QWidget
 {
@@ -36,7 +37,9 @@ class avsViewer : public QWidget
     int m_desktopWidth, m_desktopHeight;
     QString m_ipcID, m_currentScriptContent;
     LocalSocketIpcServer* m_ipcServer;
+    /// on m_ipcClientThread - reach it only through sendMessageToSever()
     LocalSocketIpcClient* m_ipcClient;
+    QThread* m_ipcClientThread;
     QString m_matrix;
     QLabel* m_showLabel;
     double m_zoom;

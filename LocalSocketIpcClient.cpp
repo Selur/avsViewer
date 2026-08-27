@@ -30,6 +30,11 @@ LocalSocketIpcClient::LocalSocketIpcClient(const QString& remoteServername, QObj
 
 LocalSocketIpcClient::~LocalSocketIpcClient()
 {
+  // bounded last flush: queued messages would otherwise be dropped by abort()
+  if (m_socket->state() == QLocalSocket::ConnectedState) {
+    this->flushPending();
+    m_socket->waitForBytesWritten(1000);
+  }
   m_socket->abort();
   delete m_socket;
   m_socket = nullptr;

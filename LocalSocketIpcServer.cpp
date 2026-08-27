@@ -14,12 +14,17 @@ LocalSocketIpcServer::LocalSocketIpcServer(const QString& servername, QObject *p
     : QObject(parent), m_serverName(servername), m_clientConnection(nullptr)
 {
   m_server = new QLocalServer(this);
-  for (int i = 0; i < 10; ++i) {
-    if (m_server->listen(m_serverName)) {
-      connect(m_server, SIGNAL(newConnection()), this, SLOT(socket_new_connection()));
-      break;
+  if (!m_server->listen(m_serverName)) {
+    // clear a stale socket left by a crash; only on failure, so a live server keeping the name is never unlinked
+    QLocalServer::removeServer(m_serverName);
+    if (!m_server->listen(m_serverName)) {
+      // silence here used to mean the parent's commands vanished with no clue why
+      std::cerr << "[avsViewer Server]: failed to listen on " << qPrintable(m_serverName)
+                << " - " << qPrintable(m_server->errorString()) << std::endl;
+      return;
     }
   }
+  connect(m_server, SIGNAL(newConnection()), this, SLOT(socket_new_connection()));
 }
 
 LocalSocketIpcServer::~LocalSocketIpcServer()
@@ -92,7 +97,9 @@ void LocalSocketIpcServer::socket_readReady()
   std::cout << "[avsViewer Server]: connection open:"  << (m_clientConnection->isOpen() ? "true" : "false")  << std::endl;
   std::cout << "[avsViewer Server]: connection readable" << (m_clientConnection->isReadable() ? "true" : "false")  << std::endl;
 #endif
-  QDataStream in(m_clientConnection);
+  // messageReceived() can close or replace the connection - hold on to what we read from
+  QLocalSocket * const connection = m_clientConnection;
+  QDataStream in(connection);
   in.setVersion(QDataStream::Qt_5_5);
   // a transaction rolls the read back until a whole message arrived; a split one used to decode as empty
   forever {
@@ -106,8 +113,8 @@ void LocalSocketIpcServer::socket_readReady()
     std::cout << "[avsViewer Server]: Message received:" << qPrintable(message) << std::endl;
 #endif
     emit messageReceived(QString::fromUtf8(message));
-    if (m_clientConnection == nullptr) {
-      return; // a slot closed the connection underneath us
+    if (m_clientConnection != connection) {
+      return; // a slot closed or replaced the connection underneath us
     }
   }
 }
