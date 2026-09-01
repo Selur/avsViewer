@@ -17,6 +17,7 @@ class LocalSocketIpcServer;
 class LocalSocketIpcClient;
 class QResizeEvent;
 class QThread;
+class QTimer;
 
 class avsViewer : public QWidget
 {
@@ -43,8 +44,12 @@ class avsViewer : public QWidget
     QString m_matrix;
     QLabel* m_showLabel;
     double m_zoom;
-    int m_currentFrameWidth;
-    int m_currentFrameHeight;
+    /// fires after a resize has settled, so a window drag causes one aspect adjustment, not dozens
+    QTimer* m_snapTimer;
+    /// true while we are resizing ourselves - keeps snapWindowToAspect() out of its own resize
+    bool m_adjusting;
+    /// only the first successful init() sizes the window; later ones keep what the user set
+    bool m_firstInit;
     IScriptEnvironment* m_env;
     const VideoInfo* m_inf;
     QString m_providedInput;
@@ -52,6 +57,8 @@ class avsViewer : public QWidget
     bool m_showOnly;
     void showFrame(const int &i);
     void updatePixmap(); // re-scale and re-display m_currentImage, no decoding
+    QSize frameAreaSize() const; // the area the frame is drawn into, valid before the first show()
+    void snapWindowToAspect(); // keep the frame area at the clip's aspect ratio
     void updateTitle();
     QString matrixSuffix() const;
     void reportInitError(int code);
@@ -83,6 +90,7 @@ class avsViewer : public QWidget
     // event overrides, not slots; override keeps them bound if Qt changes a signature
     void wheelEvent(QWheelEvent *event) override;
     void resizeEvent(QResizeEvent* event) override;
+    void changeEvent(QEvent* event) override;
     bool eventFilter(QObject *watched, QEvent *event) override;
 
   private slots:

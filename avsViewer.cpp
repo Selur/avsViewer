@@ -29,6 +29,8 @@
 #include <QFile>
 #include <QScrollBar>
 #include <QScreen>
+#include <QTimer>
+#include <QGridLayout>
 
 const QString SEP1 = " ### ";
 const AVS_Linkage *AVS_linkage = 0;
@@ -41,7 +43,7 @@ avsViewer::avsViewer(QWidget *parent, const QString& path, const double& mult, c
         m_ipcID(ipcID), m_currentScriptContent(QString()), m_ipcServer(nullptr), m_ipcClient(nullptr),
         m_ipcClientThread(nullptr),
         m_matrix(matrix), m_showLabel(new QLabel()), m_zoom(1),
-        m_currentFrameWidth(0), m_currentFrameHeight(0), m_env(nullptr),
+        m_snapTimer(new QTimer(this)), m_adjusting(false), m_firstInit(true), m_env(nullptr),
         m_inf(nullptr), m_providedInput(path), m_avsDLL(this), m_showOnly(false)
 {
   ui.setupUi(this);
@@ -62,20 +64,31 @@ avsViewer::avsViewer(QWidget *parent, const QString& path, const double& mult, c
   m_desktopHeight = height;
   std::cout << "-> using desktop resolution: " << m_desktopWidth << "x" << m_desktopHeight << std::endl;
   ui.scrollArea->setWidget(m_showLabel);
+  m_showLabel->setAlignment(Qt::AlignCenter); // whatever slack is left over, split it evenly
   m_showLabel->installEventFilter(this); // see eventFilter(): click the image, focus the slider
   ui.scrollArea->viewport()->installEventFilter(this);
+  m_snapTimer->setSingleShot(true);
+  m_snapTimer->setInterval(120); // long enough to coalesce a window drag into one adjustment
+  connect(m_snapTimer, &QTimer::timeout, this, &avsViewer::snapWindowToAspect);
   QString avisynthDll = QDir::toNativeSeparators(qApp->applicationDirPath() + QDir::separator() + QString(AVISYNTH_LIB));
   if (!QFile::exists(avisynthDll)) {
     avisynthDll = QString(AVISYNTH_LIB);
   }
   m_avsDLL.setFileName(avisynthDll);
-  if (m_currentInput.isEmpty()) {
-    return;
+  if (!m_currentInput.isEmpty()) {
+    delete ui.openAvsPushButton;
+    delete ui.histogramCheckBox;
+    m_showOnly = true;
   }
-  delete ui.openAvsPushButton;
-  delete ui.histogramCheckBox;
-  m_showOnly = true;
-  this->reportInitError(this->init(0));
+  // Run the layout now, after the show-only deletions so it reflects the controls that remain:
+  // init() below needs the scroll area to have a real size, and until the layout has been
+  // activated once it still carries the default 100x30 it was constructed with.
+  if (this->layout() != nullptr) {
+    this->layout()->activate();
+  }
+  if (m_showOnly) {
+    this->reportInitError(this->init(0));
+  }
 }
 
 // show a failed init() in the window instead of only on stderr
@@ -102,7 +115,6 @@ void avsViewer::reportInitError(int code)
     text += "\n\n" + m_lastError;
   }
   m_showLabel->setPixmap(QPixmap());
-  m_showLabel->setAlignment(Qt::AlignCenter);
   m_showLabel->setWordWrap(true);
   m_showLabel->setText(text);
   std::cerr << qPrintable(text) << std::endl;
@@ -908,7 +920,9 @@ int avsViewer::init(int start)
     std::cerr << qPrintable(tr("Init called on existing environment,..")) << std::endl;
     return -2;
   }
-  bool firstTime = this->minimumSize().width() == 0;
+  // m_firstInit, not 'minimumSize().width() == 0': the constructor now activates the layout
+  // before calling init(0), and activating a layout is what gives a window its minimum size
+  const bool firstTime = m_firstInit;
   sendMessageToSever(tr("Initializing the avisynth script environment,.."));
   if (!this->initEnv()) {
     return -3;
@@ -963,6 +977,7 @@ int avsViewer::init(int start)
       std::cerr << qPrintable(tr("Input has no video stream -> aborting")) << std::endl;
       return -11;
     }
+    this->showVideoInfo(); // the clip changed under us, so re-log it and re-read m_frameCount
   }
   bool changeLabelSize = false;
   int width = 0, height = 0;
@@ -970,32 +985,18 @@ int avsViewer::init(int start)
   ui.frameHorizontalSlider->setMaximum(m_frameCount -1);
   ui.jumpToSpinBox->setMaximum(m_frameCount -1);
   ui.frameHorizontalSlider->resetMarks();
-  if (!m_showOnly) {
-    this->adjustLabelSize(changeLabelSize && (firstTime || ui.histogramCheckBox->isChecked() || !scrolling), width, height); // adjust label size
-  } else {
-    this->adjustLabelSize(changeLabelSize && (firstTime || !scrolling), width, height); // adjust label size
-  }
-
+  // size the window before decoding, so the frame is scaled once, straight to its final size
+  this->adjustWindowSize(changeLabelSize, width, height);
+  this->adjustLabelSize(changeLabelSize, width, height);
   if (start < 0) {
     start = 0;
   }
   this->showFrame(start); //show frame
-  this->adjustWindowSize(changeLabelSize, width, height);
   this->sendMessageToSever(tr("finished initializing the avisynth script environment,.."));
-
-  if (!m_showOnly) {
-    if ((!firstTime && !ui.histogramCheckBox->isChecked()) || this->isFullScreen()) {
-      return 0;
-    }
-  } else {
-    if (!firstTime || this->isFullScreen()) {
-      return 0;
-    }
-  }
-
-  if (changeLabelSize && !scrolling) {
-    m_showLabel->resize(ui.scrollArea->size());
-  }
+  m_firstInit = false;
+  // Info, Histogram or a different script can all change the clip's aspect ratio, so let the
+  // window follow it. Does nothing when the window is already at the right ratio.
+  m_snapTimer->start();
   return 0;
 }
 
@@ -1065,29 +1066,117 @@ void avsViewer::showVideoInfo()
   std::cout << std::endl;
 }
 
+// The area the frame is actually drawn into. This deliberately reads the scroll area and
+// not its viewport: the viewport only gets a real size after show(), which is too late for
+// the init(0) the constructor runs, while the scroll area is correct as soon as the layout
+// has been activated. See docs/fit-to-frame-plan.md for the measurements behind that.
+QSize avsViewer::frameAreaSize() const
+{
+  QSize area = ui.scrollArea->size();
+  if (ui.scrollArea->verticalScrollBar()->isVisible()) {
+    area.rwidth() -= ui.scrollArea->verticalScrollBar()->width();
+  }
+  if (ui.scrollArea->horizontalScrollBar()->isVisible()) {
+    area.rheight() -= ui.scrollArea->horizontalScrollBar()->height();
+  }
+  if (area.width() > 32 && area.height() > 32) {
+    return area;
+  }
+  // The layout has not run yet, so the scroll area still has its default size. Everything
+  // around it does have a usable size hint, so add those up rather than guess a constant.
+  const QGridLayout* grid = qobject_cast<const QGridLayout*>(this->layout());
+  if (grid == nullptr) {
+    return this->size();
+  }
+  const QMargins margins = grid->contentsMargins();
+  const int spacing = qMax(0, grid->verticalSpacing());
+  const int chromeHeight = margins.top() + margins.bottom() + 3 * spacing
+                         + ui.frameHorizontalSlider->sizeHint().height()
+                         + ui.horizontalLayout->sizeHint().height()
+                         + ui.horizontalLayout_2->sizeHint().height();
+  return QSize(this->width() - margins.left() - margins.right(),
+               this->height() - chromeHeight);
+}
+
+// Keep the frame area at the clip's aspect ratio, so the image fills it exactly instead of
+// leaving empty space beside or above it. Maximised and full screen are exempt: there the
+// window size is not ours to choose, so the image is centred and letterboxed instead.
+void avsViewer::snapWindowToAspect()
+{
+  if (m_adjusting || !this->isVisible() || m_currentImage.isNull()) {
+    return;
+  }
+  if (this->isMaximized() || this->isFullScreen()) {
+    return;
+  }
+  // 'Fixed zoom' scales by hand and scrolls, so shrink-wrapping the window would fight the
+  // user. The other two modes fit the image to the frame area, which is what this is for.
+  if (ui.zoomHandlingComboBox->currentText() == "Fixed zoom") {
+    return;
+  }
+  const int imageWidth = m_currentImage.width();
+  const int imageHeight = m_currentImage.height();
+  if (imageWidth <= 0 || imageHeight <= 0) {
+    return;
+  }
+  const QScreen* screen = this->screen();
+  if (screen == nullptr) {
+    return;
+  }
+  const QSize chrome = this->size() - this->frameAreaSize();
+  // resize() sets the client area; the window manager puts its frame around that
+  const QRect available = screen->availableGeometry();
+  const QRect frameBefore = this->frameGeometry();
+  const int decorationWidth = qMax(0, frameBefore.width() - this->width());
+  const int decorationHeight = qMax(0, frameBefore.height() - this->height());
+  const int maxWidth = available.width() - decorationWidth;
+  const int maxHeight = available.height() - decorationHeight;
+  int wantedWidth = this->width();
+  int wantedHeight = qRound((wantedWidth - chrome.width()) * imageHeight / double(imageWidth))
+                     + chrome.height();
+  if (wantedHeight > maxHeight) { // would grow off screen, so take the height and follow with the width
+    wantedHeight = maxHeight;
+    wantedWidth = qMin(maxWidth,
+                       qRound((wantedHeight - chrome.height()) * imageWidth / double(imageHeight))
+                       + chrome.width());
+  }
+  if (wantedWidth == this->width() && wantedHeight == this->height()) {
+    return;
+  }
+  m_adjusting = true; // resize() re-enters resizeEvent(), which must not schedule another snap
+  this->resize(wantedWidth, wantedHeight);
+  // Growing only ever adds to the bottom and the right, so a window sitting low on the screen
+  // would push its control rows off the edge. Pull it back in rather than leave them unreachable.
+  // frameGeometry() still reports the old rectangle here, so work out where the window lands
+  // from the size we just asked for and the decorations measured before the resize.
+  const QRect frame(frameBefore.topLeft(),
+                    QSize(wantedWidth + decorationWidth, wantedHeight + decorationHeight));
+  QPoint shift(qMin(0, available.right() - frame.right()), qMin(0, available.bottom() - frame.bottom()));
+  shift.rx() += qMax(0, available.left() - (frame.left() + shift.x()));
+  shift.ry() += qMax(0, available.top() - (frame.top() + shift.y()));
+  if (!shift.isNull()) {
+    this->move(this->pos() + shift);
+  }
+  m_adjusting = false;
+}
+
+// works out how large the frame area should be for the current clip
 void avsViewer::adjustToVideoInfo(const bool& scrolling, const bool& first, int& width, int& height, bool& changeLabelSize)
 {
-  this->showVideoInfo();
   width = m_inf->width;
   height = m_inf->height;
-  if (m_currentFrameWidth != 0) {
-    width = m_currentFrameWidth;
-    height = m_currentFrameHeight;
-  } else {
-    m_currentFrameWidth = width;
-    m_currentFrameHeight = height;
+  if (first) { // only the first init sizes the window, later ones keep what the user set
     changeLabelSize = true;
-  }
-  if (!scrolling) {
-    if (first) {
-      while (width > (m_desktopWidth - 50) || height > (m_desktopHeight - 50)) {
-        width *= 0.9;
-        height *= 0.9;
-      }
-    } else {
-      width = ui.scrollArea->width();
-      height = ui.scrollArea->height();
+    while (width > (m_desktopWidth - 50) || height > (m_desktopHeight - 50)) {
+      width = qRound(width * 0.9);
+      height = qRound(height * 0.9);
     }
+    return;
+  }
+  if (!scrolling) { // fitting: the label covers the frame area, whatever size the clip is
+    const QSize area = this->frameAreaSize();
+    width = area.width();
+    height = area.height();
   }
 }
 
@@ -1102,19 +1191,18 @@ void avsViewer::adjustLabelSize(const bool& adjust, const int& width, const int&
 }
 
 
-// adjust the size of the Window
+// Size the window so that its frame area comes out exactly width x height. Driving this from
+// the clip size rather than from sizeHint() is what keeps it from collapsing onto the control
+// rows: sizeHint() follows the label, which follows a pixmap that has not been scaled yet.
 void avsViewer::adjustWindowSize(const bool& adjust, const int& width, const int& height)
 {
   if (!adjust) {
     return;
   }
-  if (width > height) {
-    this->resize(this->width(), this->sizeHint().height());
-  } else if (width < height){
-    this->resize(this->sizeHint().width(), this->height());
-  } else {
-    this->adjustSize();
-  }
+  const QSize chrome = this->size() - this->frameAreaSize();
+  m_adjusting = true; // the snap runs once at the end of init(), not from this resize
+  this->resize(width + chrome.width(), height + chrome.height());
+  m_adjusting = false;
 }
 
 
@@ -1204,7 +1292,9 @@ void avsViewer::updatePixmap()
     return;
   }
   if (zoomHandling != "Fixed zoom") {
-    m_showLabel->setPixmap(map.scaled(this->width()-8, this->height()-40, Qt::KeepAspectRatio, Qt::SmoothTransformation));
+    // the area the frame is drawn into, not the whole window: the control rows below it are
+    // 76px tall, so scaling into 'window minus a constant' overshot and clipped the bottom
+    m_showLabel->setPixmap(map.scaled(this->frameAreaSize(), Qt::KeepAspectRatio, Qt::SmoothTransformation));
   }
   else if (m_zoom != 1.0) {
     m_showLabel->setPixmap(
@@ -1213,8 +1303,6 @@ void avsViewer::updatePixmap()
   else {
     m_showLabel->setPixmap(map);
   }
-  m_currentFrameWidth = m_showLabel->width();
-  m_currentFrameHeight = m_showLabel->height();
 }
 
 // only show the matrix when one was actually given, not a bare "(matrix: )"
@@ -1307,6 +1395,18 @@ void avsViewer::resizeEvent(QResizeEvent* event)
    QWidget::resizeEvent(event);
    // only re-scale: showFrame() would re-run the whole filter chain on every resize event
    this->updatePixmap();
+   if (!m_adjusting) { // the timer coalesces a drag into a single aspect adjustment
+     m_snapTimer->start();
+   }
+}
+
+// leaving maximised or full screen hands the window size back to us, so re-fit the aspect
+void avsViewer::changeEvent(QEvent* event)
+{
+  QWidget::changeEvent(event);
+  if (event->type() == QEvent::WindowStateChange) {
+    m_snapTimer->start();
+  }
 }
 
 // shows the next frame
