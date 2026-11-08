@@ -8,6 +8,9 @@ using namespace std;
 
 int main(int argc, char *argv[])
 {
+#ifdef Q_OS_WIN
+  qputenv("QT_MEDIA_BACKEND", "windows"); // the WASAPI backend, no FFmpeg plugin needed for plain audio output
+#endif
   QApplication a(argc, argv);
   QString path;
   double mult = 0;

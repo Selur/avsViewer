@@ -31,6 +31,10 @@
 #include <QScreen>
 #include <QTimer>
 #include <QGridLayout>
+#include <QShortcut>
+#include <QSignalBlocker>
+#include "AvsAudioOutput.h"
+#include "AvsPlayback.h"
 
 const QString SEP1 = " ### ";
 const AVS_Linkage *AVS_linkage = 0;
@@ -44,9 +48,15 @@ avsViewer::avsViewer(QWidget *parent, const QString& path, const double& mult, c
         m_ipcClientThread(nullptr),
         m_matrix(matrix), m_showLabel(new QLabel()), m_zoom(1),
         m_snapTimer(new QTimer(this)), m_adjusting(false), m_firstInit(true), m_env(nullptr),
-        m_inf(nullptr), m_providedInput(path), m_avsDLL(this), m_showOnly(false)
+        m_inf(nullptr), m_providedInput(path), m_avsDLL(this), m_showOnly(false), m_playback(new AvsPlayback(this)),
+        m_audio(new AvsAudioOutput(this))
 {
   ui.setupUi(this);
+  connect(m_playback, &AvsPlayback::advance, this, &avsViewer::playNextFrame);
+  connect(m_audio, &AvsAudioOutput::fed, this, &avsViewer::playWithAudio);
+  connect(m_playback, &AvsPlayback::stopped, this, [](const QString& stats) { std::cout << qPrintable(stats) << std::endl; });
+  // a window shortcut, so Space plays and pauses whichever control has the focus (spin boxes keep it for typing)
+  connect(new QShortcut(QKeySequence(Qt::Key_Space), this), &QShortcut::activated, ui.playPushButton, &QPushButton::toggle);
   QString stylepath = QApplication::applicationDirPath()+"/avsViewer.style";
   stylepath = QDir::toNativeSeparators(stylepath);
   if (QFile::exists(stylepath)) {
@@ -160,6 +170,7 @@ void avsViewer::wheelEvent(QWheelEvent* event)
 
 avsViewer::~avsViewer()
 {
+  this->stopPlayback();
   std::cout << qPrintable(tr("Closing,...")) << std::endl;
   // stop the client thread first: it deletes the client, so m_ipcClient dangles after this
   if (m_ipcClientThread != nullptr) {
@@ -354,6 +365,7 @@ static QString getDirectory(const QString& input)
 
 void avsViewer::on_saveImagePushButton_clicked()
 {
+  this->stopPlayback(); // the file dialog runs its own event loop, playback would change the frame under it
   m_showLabel->setText(tr("Set output png file,.."));
   QString name = tr("Select input file");
   QString select = tr("Output (*.png)");
@@ -374,6 +386,7 @@ void avsViewer::on_saveImagePushButton_clicked()
 
 void avsViewer::cleanUp()
 {
+  this->stopPlayback(); // every reload (refresh, changeTo, Open) passes here
   if (m_env != 0) {
     this->sendMessageToSever("Clean up old script environment,..");
     m_res = 0;
@@ -979,6 +992,7 @@ int avsViewer::init(int start)
     }
     this->showVideoInfo(); // the clip changed under us, so re-log it and re-read m_frameCount
   }
+  ui.audioPushButton->setEnabled(m_inf->HasAudio());
   bool changeLabelSize = false;
   int width = 0, height = 0;
   this->adjustToVideoInfo(scrolling, firstTime, width, height, changeLabelSize);
@@ -1252,23 +1266,165 @@ bool avsViewer::grabFrame(const int& i, QImage& target)
 }
 
 // decodes frame i and shows it; only this path touches Avisynth, re-scaling goes through updatePixmap()
-void avsViewer::showFrame(const int& i)
+bool avsViewer::showFrame(const int& i)
 {
   // i >= m_frameCount: valid indices are 0..m_frameCount-1, the old > let Next run one past the end
   if (m_env == nullptr || m_inf == nullptr || i < 0 || i >= m_frameCount || m_frameCount == 0) {
-    return;
+    return false;
   }
   try {
     if (!this->grabFrame(i, m_currentImage)) { // already flipped and detached
       std::cerr << " could not get PVideoFrame data (" << i << ")" << std::endl;
-      return;
+      return false;
     }
     m_current = i; //set m_current to i
-    ui.frameHorizontalSlider->setSliderPosition(m_current); // adjust the slider position
+    {
+      // the slider's valueChanged would call showFrame(i) again and decode, convert and scale the frame twice
+      const QSignalBlocker blocker(ui.frameHorizontalSlider);
+      ui.frameHorizontalSlider->setSliderPosition(m_current);
+    }
+    ui.frameNumberLabel->setText("(" + QString::number(m_current) + ")");
     this->updateTitle();
     this->updatePixmap();
+    return true;
   } catch (...) {
     std::cerr << " couldn't show frame,..." << "(" << i << ")" << std::endl;
+  }
+  return false;
+}
+
+void avsViewer::stopPlayback()
+{
+  m_playback->stop();
+  if (m_audio->isActive() || m_audioRun.isValid()) {
+    if (m_audio->isActive()) {
+      std::cout << qPrintable(QString("audio clock %1 s from frame %2, now at frame %3").arg(m_audio->clock(), 0, 'f', 3)
+                                .arg(m_audioStartFrame).arg(m_current)) << std::endl;
+    }
+    m_audio->stop();
+    if (m_audioRun.isValid()) {
+      const double seconds = double(m_audioRun.nsecsElapsed()) / 1e9;
+      std::cout << qPrintable(QString("playback with audio: %1 frames in %2 s = %3 fps, audio restarted %4 time(s) at a late picture")
+                                .arg(m_audioShown).arg(seconds, 0, 'f', 2).arg(seconds > 0.0 ? double(m_audioShown) / seconds : 0.0, 0, 'f', 2)
+                                .arg(m_audioRestarts)) << std::endl;
+      m_audioRun.invalidate();
+    }
+  }
+  const QSignalBlocker blocker(ui.playPushButton);
+  ui.playPushButton->setChecked(false);
+  ui.playPushButton->setText(tr("Play"));
+}
+
+void avsViewer::on_playPushButton_toggled(bool checked)
+{
+  if (!checked) {
+    this->stopPlayback();
+    return;
+  }
+  if (m_env == nullptr || m_inf == nullptr || m_frameCount < 2) {
+    this->stopPlayback();
+    return;
+  }
+  ui.playPushButton->setText(tr("Pause"));
+  // the click returns at once: opening the sink, reading ahead and decoding a 5K frame take a few hundred ms
+  QTimer::singleShot(0, this, &avsViewer::startPlaying);
+}
+
+void avsViewer::startPlaying()
+{
+  if (!ui.playPushButton->isChecked() || m_playback->isPlaying() || m_audio->isActive() || m_env == nullptr || m_inf == nullptr) {
+    return;
+  }
+  const int next = m_current + 1 >= m_frameCount ? 0 : m_current + 1;
+  m_lastPlayed = m_current;
+  if (ui.audioPushButton->isEnabled() && ui.audioPushButton->isChecked() && this->startAudioAt(next)) {
+    m_audioShown = 0;
+    m_audioRestarts = 0;
+    m_audioRun.start();
+    return;
+  }
+  this->startOwnClock();
+}
+
+void avsViewer::on_audioPushButton_toggled(bool checked)
+{
+  Q_UNUSED(checked)
+  if (!m_playback->isPlaying() && !m_audio->isActive()) {
+    return;
+  }
+  this->stopPlayback(); // play again in the other mode from the current frame
+  ui.playPushButton->setChecked(true);
+}
+
+bool avsViewer::startAudioAt(int frame)
+{
+  QString error;
+  if (!m_audio->start(m_res.AsClip(), m_env, *m_inf, m_inf->AudioSamplesFromFrames(frame), error)) {
+    std::cout << qPrintable(QString("audio: %1, playing without audio").arg(error)) << std::endl;
+    return false;
+  }
+  m_audioStartFrame = frame;
+  return true;
+}
+
+void avsViewer::startOwnClock()
+{
+  m_audio->stop();
+  m_playback->start(m_inf->fps_numerator, m_inf->fps_denominator);
+}
+
+// called after each audio feed: shows the next frame once the audio has reached it; far behind, the audio restarts at the picture
+void avsViewer::playWithAudio()
+{
+  if (ui.frameHorizontalSlider->isSliderDown() || m_inf == nullptr) {
+    return;
+  }
+  int next = m_current + 1;
+  if (m_current != m_lastPlayed || next >= m_frameCount) { // moved by hand, or looping: the audio restarts there
+    if (next >= m_frameCount) {
+      next = 0;
+    }
+    if (!this->startAudioAt(next)) {
+      this->startOwnClock();
+      return;
+    }
+    m_lastPlayed = m_current;
+  }
+  if (m_audio->finished()) { // the audio ran out before the picture: the picture goes on with its own timing
+    this->startOwnClock();
+    return;
+  }
+  const double framePeriod = double(m_inf->fps_denominator) / double(m_inf->fps_numerator);
+  const double due = double(next - m_audioStartFrame) * framePeriod;
+  const double clock = m_audio->clock();
+  if (clock < due) {
+    return;
+  }
+  // a forward seek of the picture costs 0.5-2.7 s at 5K and lands behind again, restarting the audio costs nothing
+  if (clock - due > 0.5) {
+    if (!this->startAudioAt(next)) {
+      this->startOwnClock();
+      return;
+    }
+    ++m_audioRestarts;
+  }
+  if (!this->showFrame(next)) {
+    this->stopPlayback();
+    return;
+  }
+  m_lastPlayed = next;
+  ++m_audioShown;
+}
+
+// the frame after the current one, so Next, Previous, jumps and the slider move the play position; loops at the end
+void avsViewer::playNextFrame()
+{
+  if (ui.frameHorizontalSlider->isSliderDown()) {
+    return; // the user holds the slider, playback waits for the release
+  }
+  const int next = m_current + 1 >= m_frameCount ? 0 : m_current + 1;
+  if (!this->showFrame(next)) {
+    this->stopPlayback();
   }
 }
 

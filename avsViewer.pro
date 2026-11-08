@@ -1,5 +1,6 @@
 QT += core \
     gui \
+    multimedia \
     network
 CONFIG += qt
 CONFIG += console
@@ -57,12 +58,16 @@ win32-msvc* {
     DEFINES += NOMINMAX
 }
 
-HEADERS += LocalSocketIpcServer.h \
+HEADERS += AvsAudioOutput.h \
+    AvsPlayback.h \
+    LocalSocketIpcServer.h \
     LocalSocketIpcClient.h \
     avsViewer.h \
     MarkSlider.h \
     MoveScrollArea.h
-SOURCES += LocalSocketIpcServer.cpp \
+SOURCES += AvsAudioOutput.cpp \
+    AvsPlayback.cpp \
+    LocalSocketIpcServer.cpp \
     LocalSocketIpcClient.cpp \
     avsViewer.cpp \
     MarkSlider.cpp \

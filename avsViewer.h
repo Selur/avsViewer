@@ -11,8 +11,11 @@
 #include <QLabel>
 #include <QFile>
 #include <QLibrary>
+#include <QElapsedTimer>
 
 
+class AvsAudioOutput;
+class AvsPlayback;
 class LocalSocketIpcServer;
 class LocalSocketIpcClient;
 class QResizeEvent;
@@ -55,7 +58,17 @@ class avsViewer : public QWidget
     QString m_providedInput;
     QLibrary m_avsDLL;
     bool m_showOnly;
-    void showFrame(const int &i);
+    AvsPlayback* m_playback;
+    // with audio, the audio is the clock: frame m_audioStartFrame is at audio time 0
+    AvsAudioOutput* m_audio;
+    int m_audioStartFrame = 0;
+    int m_lastPlayed = -1;
+    qint64 m_audioShown = 0, m_audioRestarts = 0;
+    QElapsedTimer m_audioRun;
+    bool startAudioAt(int frame);
+    void startOwnClock();
+    void stopPlayback();
+    bool showFrame(const int &i);
     void updatePixmap(); // re-scale and re-display m_currentImage, no decoding
     QSize frameAreaSize() const; // the area the frame is drawn into, valid before the first show()
     void snapWindowToAspect(); // keep the frame area at the clip's aspect ratio
@@ -111,6 +124,11 @@ class avsViewer : public QWidget
     void on_jumpToEndPushButton_clicked();
     void on_zoomHandlingComboBox_currentTextChanged(const QString& value);
     void on_zoomScaleDoubleSpinBox_valueChanged(const double& value);
+    void on_playPushButton_toggled(bool checked);
+    void on_audioPushButton_toggled(bool checked);
+    void startPlaying();
+    void playNextFrame();
+    void playWithAudio();
 };
 
 #endif // AVSVIEWER_H
